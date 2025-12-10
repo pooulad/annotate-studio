@@ -1,6 +1,6 @@
 # Annotate Studio
 
-Frontend for Annotate Studio annotation
+Frontend for Annotate Studio
 
 ## Setup
 
