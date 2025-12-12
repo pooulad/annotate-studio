@@ -172,6 +172,14 @@ function drawShape(ctx: CanvasRenderingContext2D, shape: ShapeData, color: strin
   ctx.globalAlpha = 1
 }
 
+interface ToolSettings {
+  color: string
+  thickness: number
+  opacity: number
+  borderColor?: string
+  backgroundColor?: string
+}
+
 interface ViewerProps {
   currentPage: number
   currentPageIndex: number
@@ -183,9 +191,7 @@ interface ViewerProps {
   onNextPage: () => void
   activeTool: Tool
   activeShape: ShapeType
-  strokeColor: string
-  strokeThickness: number
-  strokeOpacity: number
+  toolSettings: Record<string, ToolSettings>
   pendingSymbol?: string | null
   onSymbolPlaced?: () => void
 }
@@ -200,12 +206,13 @@ export function Viewer({
   onNextPage,
   activeTool,
   activeShape,
-  strokeColor,
-  strokeThickness,
-  strokeOpacity,
+  toolSettings,
   pendingSymbol,
   onSymbolPlaced,
 }: ViewerProps) {
+  const getToolSettings = (tool: string): ToolSettings => {
+    return toolSettings[tool] || toolSettings.pen
+  }
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [isDrawing, setIsDrawing] = useState(false)
@@ -223,22 +230,24 @@ export function Viewer({
   const [dragOffset, setDragOffset] = useState<Point>({ x: 0, y: 0 })
   const [isResizing, setIsResizing] = useState(false)
   const [resizeCorner, setResizeCorner] = useState<'tl' | 'tr' | 'bl' | 'br' | null>(null)
+  const [isZooming, setIsZooming] = useState<'in' | 'out' | null>(null)
 
   const { strokes, addStroke, updateStroke, deleteStroke, selectStroke, selectedStrokeId, getStrokeById, undo, redo, canUndo, canRedo, getPageStrokes } = useCanvasStore()
 
   const handleTextSubmit = useCallback(() => {
     if (textInput && textInput.value.trim()) {
+      const textSettings = getToolSettings("text")
       addStroke({
         points: [textInput.position],
-        color: strokeColor,
-        thickness: strokeThickness,
-        opacity: strokeOpacity,
+        color: textSettings.color,
+        thickness: textSettings.thickness,
+        opacity: textSettings.opacity,
         tool: `text:${textInput.value}`,
         pageId: currentPage,
       })
     }
     setTextInput(null)
-  }, [textInput, strokeColor, strokeThickness, strokeOpacity, currentPage, addStroke])
+  }, [textInput, getToolSettings, currentPage, addStroke])
 
   const canvasWidth = 595
   const canvasHeight = 842
@@ -378,7 +387,19 @@ export function Viewer({
 
     if (activeTool === "text") {
       selectStroke(null)
-      if (textInput) return
+      
+      if (textInput && textInput.value.trim()) {
+        const textSettings = getToolSettings("text")
+        addStroke({
+          points: [textInput.position],
+          color: textSettings.color,
+          thickness: textSettings.thickness,
+          opacity: textSettings.opacity,
+          tool: `text:${textInput.value}`,
+          pageId: currentPage,
+        })
+      }
+      setTextInput(null)
       
       if (pendingSymbol) {
         setIsDrawing(true)
@@ -406,7 +427,7 @@ export function Viewer({
       if (strokeId) {
         const stroke = getStrokeById(strokeId)
         if (stroke && stroke.tool.startsWith("shape-")) {
-          updateStroke(strokeId, { fillColor: strokeColor })
+          updateStroke(strokeId, { fillColor: getToolSettings("fill").color })
         }
       }
       return
@@ -416,7 +437,7 @@ export function Viewer({
 
     setIsDrawing(true)
     setCurrentStroke([point])
-  }, [activeTool, getCanvasPoint, findStrokeAtPoint, selectStroke, getStrokeById, getResizeCorner, selectedStrokeId, textInput, pendingSymbol, onSymbolPlaced, addStroke, strokeColor, strokeThickness, strokeOpacity, currentPage])
+  }, [activeTool, getCanvasPoint, findStrokeAtPoint, selectStroke, getStrokeById, getResizeCorner, selectedStrokeId, textInput, pendingSymbol, onSymbolPlaced, addStroke, getToolSettings, currentPage])
 
   const draw = useCallback((e: React.MouseEvent) => {
     if (isPanning) {
@@ -532,13 +553,15 @@ export function Viewer({
     }
 
     if (activeTool === "shapes" && shapeStart && shapeEnd) {
+      const shapeSettings = getToolSettings("shapes")
       addStroke({
         points: [shapeStart, shapeEnd],
-        color: strokeColor,
-        thickness: strokeThickness,
-        opacity: strokeOpacity,
+        color: shapeSettings.borderColor || shapeSettings.color,
+        thickness: shapeSettings.thickness,
+        opacity: shapeSettings.opacity,
         tool: `shape-${activeShape}`,
         pageId: currentPage,
+        backgroundColor: shapeSettings.backgroundColor !== "transparent" ? shapeSettings.backgroundColor : undefined,
       })
       setShapeStart(null)
       setShapeEnd(null)
@@ -547,13 +570,14 @@ export function Viewer({
     }
 
     if (activeTool === "text" && pendingSymbol && symbolStart && symbolEnd) {
+      const textSettings = getToolSettings("text")
       const size = Math.max(20, Math.abs(symbolEnd.x - symbolStart.x), Math.abs(symbolEnd.y - symbolStart.y))
       const thickness = Math.max(1, Math.min(20, Math.round(size / 4)))
       addStroke({
         points: [symbolStart],
-        color: strokeColor,
+        color: textSettings.color,
         thickness: thickness,
-        opacity: strokeOpacity,
+        opacity: textSettings.opacity,
         tool: `text:${pendingSymbol}`,
         pageId: currentPage,
       })
@@ -569,18 +593,19 @@ export function Viewer({
       return
     }
 
+    const currentToolSettings = getToolSettings(activeTool)
     addStroke({
       points: currentStroke,
-      color: activeTool === "eraser" ? "#ffffff" : strokeColor,
-      thickness: activeTool === "eraser" ? strokeThickness * 3 : strokeThickness,
-      opacity: activeTool === "highlighter" ? 40 : strokeOpacity,
+      color: activeTool === "eraser" ? "#ffffff" : currentToolSettings.color,
+      thickness: currentToolSettings.thickness,
+      opacity: currentToolSettings.opacity,
       tool: activeTool,
       pageId: currentPage,
     })
 
     setCurrentStroke([])
     setIsDrawing(false)
-  }, [isDrawing, isPanning, isDragging, isResizing, currentStroke, activeTool, strokeColor, strokeThickness, strokeOpacity, currentPage, addStroke, shapeStart, shapeEnd, activeShape, pendingSymbol, symbolStart, symbolEnd, onSymbolPlaced])
+  }, [isDrawing, isPanning, isDragging, isResizing, currentStroke, activeTool, getToolSettings, currentPage, addStroke, shapeStart, shapeEnd, activeShape, pendingSymbol, symbolStart, symbolEnd, onSymbolPlaced])
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -606,7 +631,9 @@ export function Viewer({
     if (e.ctrlKey || e.metaKey) {
       e.preventDefault()
       const delta = e.deltaY > 0 ? -10 : 10
+      setIsZooming(delta > 0 ? 'in' : 'out')
       onZoomChange(Math.min(Math.max(zoom + delta, 25), 400))
+      setTimeout(() => setIsZooming(null), 300)
     }
   }, [zoom, onZoomChange])
 
@@ -690,7 +717,7 @@ export function Viewer({
             type: shapeType,
             start: stroke.points[0],
             end: stroke.points[1],
-          }, stroke.color, stroke.thickness, stroke.opacity, stroke.fillColor)
+          }, stroke.color, stroke.thickness, stroke.opacity, stroke.fillColor || stroke.backgroundColor)
 
           if (stroke.id === selectedStrokeId) {
             const bounds = getStrokeBounds(stroke)
@@ -778,27 +805,30 @@ export function Viewer({
     })
 
     if (currentStroke.length > 0) {
+      const currentToolSettings = getToolSettings(activeTool)
       drawStroke({
         points: currentStroke,
-        color: activeTool === "eraser" ? "#ffffff" : strokeColor,
-        thickness: activeTool === "eraser" ? strokeThickness * 3 : strokeThickness,
-        opacity: activeTool === "highlighter" ? 40 : strokeOpacity,
+        color: activeTool === "eraser" ? "#ffffff" : currentToolSettings.color,
+        thickness: currentToolSettings.thickness,
+        opacity: currentToolSettings.opacity,
       })
     }
 
     if (shapeStart && shapeEnd && isDrawing && activeTool === "shapes") {
+      const shapeSettings = getToolSettings("shapes")
       drawShape(ctx, {
         type: activeShape,
         start: shapeStart,
         end: shapeEnd,
-      }, strokeColor, strokeThickness, strokeOpacity)
+      }, shapeSettings.borderColor || shapeSettings.color, shapeSettings.thickness, shapeSettings.opacity, shapeSettings.backgroundColor !== "transparent" ? shapeSettings.backgroundColor : undefined)
     }
 
     if (symbolStart && symbolEnd && isDrawing && pendingSymbol) {
+      const textSettings = getToolSettings("text")
       const size = Math.max(20, Math.abs(symbolEnd.x - symbolStart.x), Math.abs(symbolEnd.y - symbolStart.y))
       const fontSize = Math.max(14, size)
-      ctx.globalAlpha = strokeOpacity / 100
-      ctx.fillStyle = strokeColor
+      ctx.globalAlpha = textSettings.opacity / 100
+      ctx.fillStyle = textSettings.color
       ctx.font = `${fontSize}px Inter, system-ui, sans-serif`
       ctx.fillText(pendingSymbol, symbolStart.x, symbolStart.y + fontSize * 0.8)
       ctx.globalAlpha = 1
@@ -809,9 +839,11 @@ export function Viewer({
       ctx.strokeRect(symbolStart.x - 4, symbolStart.y - 4, size + 8, size + 8)
       ctx.setLineDash([])
     }
-  }, [strokes, currentStroke, activeTool, strokeColor, strokeThickness, strokeOpacity, currentPage, getPageStrokes, shapeStart, shapeEnd, isDrawing, activeShape, selectedStrokeId, symbolStart, symbolEnd, pendingSymbol, getStrokeBounds])
+  }, [strokes, currentStroke, activeTool, getToolSettings, currentPage, getPageStrokes, shapeStart, shapeEnd, isDrawing, activeShape, selectedStrokeId, symbolStart, symbolEnd, pendingSymbol, getStrokeBounds])
 
   const getCursor = useCallback(() => {
+    if (isZooming === 'in') return "url('/cursors/cursor-zoom-in.svg') 10 9, zoom-in"
+    if (isZooming === 'out') return "url('/cursors/cursor-zoom-out.svg') 10 9, zoom-out"
     if (isResizing) {
       if (resizeCorner === 'tl' || resizeCorner === 'br') return "nwse-resize"
       if (resizeCorner === 'tr' || resizeCorner === 'bl') return "nesw-resize"
@@ -819,23 +851,23 @@ export function Viewer({
     if (isDragging) return "move"
     switch (activeTool) {
       case "select":
-        return selectedStrokeId ? "move" : "default"
+        return selectedStrokeId ? "move" : "url('/cursors/cursor-default.svg') 2 2, auto"
       case "pan":
-        return isPanning ? "grabbing" : "grab"
+        return isPanning ? "url('/cursors/cursor-grabbing.svg') 12 12, grabbing" : "url('/cursors/cursor-grab.svg') 12 12, grab"
       case "pen":
       case "highlighter":
       case "shapes":
         return "crosshair"
       case "eraser":
-        return "cell"
+        return "url('/cursors/cursor-cell.svg') 12 12, cell"
       case "text":
         return pendingSymbol ? "crosshair" : "text"
       case "fill":
-        return "pointer"
+        return "url('/cursors/cursor-pointer.svg') 10 4, pointer"
       default:
-        return "default"
+        return "url('/cursors/cursor-default.svg') 2 2, auto"
     }
-  }, [activeTool, isPanning, pendingSymbol, isDragging, selectedStrokeId, isResizing, resizeCorner])
+  }, [activeTool, isPanning, pendingSymbol, isDragging, selectedStrokeId, isResizing, resizeCorner, isZooming])
 
   return (
     <TooltipProvider delayDuration={0}>
@@ -951,6 +983,10 @@ export function Viewer({
           ref={containerRef}
           className="flex flex-1 items-center justify-center overflow-hidden"
           style={{ cursor: getCursor() }}
+          onMouseDown={startDrawing}
+          onMouseMove={draw}
+          onMouseUp={stopDrawing}
+          onMouseLeave={stopDrawing}
         >
           <div
             className="relative transition-transform duration-100 ease-out"
@@ -967,6 +1003,7 @@ export function Viewer({
                 "shadow-2xl transition-shadow duration-300",
                 "dark:shadow-black/50"
               )}
+              style={{ cursor: getCursor() }}
               onMouseDown={startDrawing}
               onMouseMove={draw}
               onMouseUp={stopDrawing}
@@ -999,8 +1036,8 @@ export function Viewer({
                 style={{
                   left: textInput.position.x,
                   top: textInput.position.y - 8,
-                  fontSize: Math.max(16, strokeThickness * 5),
-                  color: strokeColor,
+                  fontSize: Math.max(16, getToolSettings("text").thickness * 5),
+                  color: getToolSettings("text").color,
                   minWidth: 20,
                   width: Math.max(20, textInput.value.length * 12 + 20),
                 }}

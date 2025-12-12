@@ -39,30 +39,61 @@ const presetColors = [
   { name: "Pink", color: "#ec4899" },
 ]
 
-interface InspectorProps {
-  selectedColor: string
-  onColorChange: (color: string) => void
+interface ToolSettings {
+  color: string
   thickness: number
-  onThicknessChange: (value: number) => void
   opacity: number
-  onOpacityChange: (value: number) => void
+  borderColor?: string
+  backgroundColor?: string
+}
+
+interface InspectorProps {
+  activeTool: string
+  currentSettings: ToolSettings
+  onSettingsChange: (updates: Partial<ToolSettings>) => void
+}
+
+const toolLabels: Record<string, string> = {
+  pen: "Pen",
+  highlighter: "Highlighter",
+  eraser: "Eraser",
+  shapes: "Shapes",
+  text: "Text",
+  fill: "Fill",
+  select: "Select",
+  pan: "Pan",
+  math: "Math",
 }
 
 export function Inspector({
-  selectedColor,
-  onColorChange,
-  thickness,
-  onThicknessChange,
-  opacity,
-  onOpacityChange,
+  activeTool,
+  currentSettings,
+  onSettingsChange,
 }: InspectorProps) {
   const [isCollapsed, setIsCollapsed] = useState(false)
   const [customColorInput, setCustomColorInput] = useState("#6366f1")
+  const [borderColorInput, setBorderColorInput] = useState("#3b82f6")
+  const [bgColorInput, setBgColorInput] = useState("#ffffff")
   const { customColors, addCustomColor, removeCustomColor, recentColors, addRecentColor } = useColorStore()
 
+  const showColor = activeTool !== "eraser" && activeTool !== "select" && activeTool !== "pan" && activeTool !== "shapes"
+  const showShapeColors = activeTool === "shapes"
+  const showThickness = activeTool === "pen" || activeTool === "highlighter" || activeTool === "eraser" || activeTool === "shapes" || activeTool === "text"
+  const showOpacity = activeTool === "pen" || activeTool === "highlighter" || activeTool === "shapes" || activeTool === "text"
+
   const handleColorSelect = (color: string) => {
-    onColorChange(color)
+    onSettingsChange({ color })
     addRecentColor(color)
+  }
+
+  const handleBorderColorSelect = (color: string) => {
+    onSettingsChange({ borderColor: color })
+    addRecentColor(color)
+  }
+
+  const handleBgColorSelect = (color: string) => {
+    onSettingsChange({ backgroundColor: color })
+    if (color !== "transparent") addRecentColor(color)
   }
 
   const handleAddCustomColor = () => {
@@ -119,6 +150,7 @@ export function Inspector({
 
         <ScrollArea className="max-h-[calc(100vh-200px)] flex-1">
           <div className="flex flex-col gap-4 p-3">
+            {showColor && (
             <section>
               <div className="mb-2 flex items-center justify-between">
                 <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
@@ -190,7 +222,7 @@ export function Inspector({
                         className={cn(
                           "h-8 w-8 rounded-lg border transition-all duration-200",
                           "hover:scale-110 hover:shadow-lg",
-                          selectedColor === item.color
+                          currentSettings.color === item.color
                             ? "ring-2 ring-violet-500 ring-offset-2 ring-offset-background scale-110"
                             : "border-border/50"
                         )}
@@ -216,7 +248,7 @@ export function Inspector({
                             className={cn(
                               "group relative h-8 w-8 rounded-lg border transition-all duration-200",
                               "hover:scale-110 hover:shadow-lg",
-                              selectedColor === color
+                              currentSettings.color === color
                                 ? "ring-2 ring-violet-500 ring-offset-2 ring-offset-background scale-110"
                                 : "border-border/50"
                             )}
@@ -261,75 +293,141 @@ export function Inspector({
                 </div>
               )}
             </section>
+            )}
 
-            <section>
-              <div className="mb-2 flex items-center justify-between">
-                <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  Thickness
+            {showShapeColors && (
+              <section>
+                <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  Border Color
                 </h3>
-                <span className="text-xs font-medium tabular-nums">{thickness}px</span>
-              </div>
-              <Slider
-                value={[thickness]}
-                onValueChange={(v) => onThicknessChange(v[0])}
-                min={1}
-                max={24}
-                step={1}
-                className="cursor-pointer"
-              />
-              <div className="mt-2 flex items-center justify-center gap-2">
-                <div
-                  className="rounded-full transition-all duration-200"
-                  style={{
-                    width: Math.max(thickness * 1.5, 6),
-                    height: Math.max(thickness * 1.5, 6),
-                    backgroundColor: selectedColor,
-                  }}
-                />
-              </div>
-            </section>
+                <div className="grid grid-cols-5 gap-1.5">
+                  {presetColors.map((item) => (
+                    <button
+                      key={`border-${item.name}`}
+                      onClick={() => handleBorderColorSelect(item.color)}
+                      className={cn(
+                        "h-7 w-7 rounded-md border transition-all duration-200",
+                        "hover:scale-110 hover:shadow-lg",
+                        currentSettings.borderColor === item.color
+                          ? "ring-2 ring-violet-500 ring-offset-1 ring-offset-background scale-110"
+                          : "border-border/50"
+                      )}
+                      style={{ backgroundColor: item.color }}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
 
-            <section>
-              <div className="mb-2 flex items-center justify-between">
-                <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  Opacity
+            {showShapeColors && (
+              <section>
+                <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  Background Color
                 </h3>
-                <span className="text-xs font-medium tabular-nums">{opacity}%</span>
-              </div>
-              <Slider
-                value={[opacity]}
-                onValueChange={(v) => onOpacityChange(v[0])}
-                min={10}
-                max={100}
-                step={5}
-                className="cursor-pointer"
-              />
-              <div className="mt-2 flex items-center justify-center">
-                <div
-                  className="h-4 w-full rounded-md"
-                  style={{
-                    background: `linear-gradient(to right, transparent, ${selectedColor})`,
-                  }}
+                <div className="grid grid-cols-5 gap-1.5">
+                  <button
+                    onClick={() => handleBgColorSelect("transparent")}
+                    className={cn(
+                      "h-7 w-7 rounded-md border transition-all duration-200 flex items-center justify-center",
+                      "hover:scale-110",
+                      currentSettings.backgroundColor === "transparent"
+                        ? "ring-2 ring-violet-500 ring-offset-1 ring-offset-background scale-110"
+                        : "border-border/50"
+                    )}
+                    style={{ background: "repeating-conic-gradient(#d4d4d8 0% 25%, transparent 0% 50%) 50% / 8px 8px" }}
+                  >
+                    <X className="h-3 w-3 text-muted-foreground" />
+                  </button>
+                  {presetColors.slice(0, 9).map((item) => (
+                    <button
+                      key={`bg-${item.name}`}
+                      onClick={() => handleBgColorSelect(item.color)}
+                      className={cn(
+                        "h-7 w-7 rounded-md border transition-all duration-200",
+                        "hover:scale-110 hover:shadow-lg",
+                        currentSettings.backgroundColor === item.color
+                          ? "ring-2 ring-violet-500 ring-offset-1 ring-offset-background scale-110"
+                          : "border-border/50"
+                      )}
+                      style={{ backgroundColor: item.color }}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {showThickness && (
+              <section>
+                <div className="mb-2 flex items-center justify-between">
+                  <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                    {activeTool === "eraser" ? "Eraser Size" : "Thickness"}
+                  </h3>
+                  <span className="text-xs font-medium tabular-nums">{currentSettings.thickness}px</span>
+                </div>
+                <Slider
+                  value={[currentSettings.thickness]}
+                  onValueChange={(v) => onSettingsChange({ thickness: v[0] })}
+                  min={1}
+                  max={activeTool === "eraser" ? 50 : activeTool === "highlighter" ? 40 : 24}
+                  step={1}
+                  className="cursor-pointer"
                 />
-              </div>
-            </section>
+                <div className="mt-2 flex items-center justify-center gap-2">
+                  <div
+                    className="rounded-full transition-all duration-200"
+                    style={{
+                      width: Math.max(currentSettings.thickness * 1.5, 6),
+                      height: Math.max(currentSettings.thickness * 1.5, 6),
+                      backgroundColor: activeTool === "eraser" ? "#d4d4d8" : currentSettings.color,
+                    }}
+                  />
+                </div>
+              </section>
+            )}
+
+            {showOpacity && (
+              <section>
+                <div className="mb-2 flex items-center justify-between">
+                  <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                    Opacity
+                  </h3>
+                  <span className="text-xs font-medium tabular-nums">{currentSettings.opacity}%</span>
+                </div>
+                <Slider
+                  value={[currentSettings.opacity]}
+                  onValueChange={(v) => onSettingsChange({ opacity: v[0] })}
+                  min={10}
+                  max={100}
+                  step={5}
+                  className="cursor-pointer"
+                />
+                <div className="mt-2 flex items-center justify-center">
+                  <div
+                    className="h-4 w-full rounded-md"
+                    style={{
+                      background: `linear-gradient(to right, transparent, ${currentSettings.color})`,
+                    }}
+                  />
+                </div>
+              </section>
+            )}
 
             <section className="rounded-xl border border-border/50 bg-muted/30 p-3">
               <div className="flex items-center gap-2">
                 <Pipette className="h-4 w-4 text-muted-foreground" />
                 <h3 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  Current
+                  {toolLabels[activeTool] || "Current"}
                 </h3>
               </div>
               <div className="mt-2 flex items-center gap-3">
                 <div
                   className="h-10 w-10 rounded-xl border border-border shadow-inner"
-                  style={{ backgroundColor: selectedColor, opacity: opacity / 100 }}
+                  style={{ backgroundColor: activeTool === "eraser" ? "#d4d4d8" : currentSettings.color, opacity: currentSettings.opacity / 100 }}
                 />
                 <div className="flex flex-col">
-                  <span className="font-mono text-xs uppercase">{selectedColor}</span>
+                  <span className="font-mono text-xs uppercase">{activeTool === "eraser" ? "Eraser" : currentSettings.color}</span>
                   <span className="text-[10px] text-muted-foreground">
-                    {thickness}px · {opacity}%
+                    {currentSettings.thickness}px · {currentSettings.opacity}%
                   </span>
                 </div>
               </div>

@@ -72,6 +72,7 @@ interface Stroke {
   pageId: number
   timestamp: number
   fillColor?: string
+  backgroundColor?: string
 }
 
 interface CanvasStore {
@@ -82,7 +83,7 @@ interface CanvasStore {
   selectedStrokeId: string | null
   
   addStroke: (stroke: Omit<Stroke, "id" | "timestamp">) => void
-  updateStroke: (id: string, updates: Partial<Pick<Stroke, "points" | "thickness" | "color" | "fillColor">>) => void
+  updateStroke: (id: string, updates: Partial<Pick<Stroke, "points" | "thickness" | "color" | "fillColor" | "backgroundColor">>) => void
   deleteStroke: (id: string) => void
   selectStroke: (id: string | null) => void
   getStrokeById: (id: string) => Stroke | undefined

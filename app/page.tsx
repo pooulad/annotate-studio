@@ -15,6 +15,23 @@ interface Page {
   hasAnnotations: boolean
 }
 
+interface ToolSettings {
+  color: string
+  thickness: number
+  opacity: number
+  borderColor?: string
+  backgroundColor?: string
+}
+
+const defaultToolSettings: Record<string, ToolSettings> = {
+  pen: { color: "#18181b", thickness: 3, opacity: 100 },
+  highlighter: { color: "#eab308", thickness: 20, opacity: 40 },
+  eraser: { color: "#ffffff", thickness: 20, opacity: 100 },
+  shapes: { color: "#3b82f6", thickness: 2, opacity: 100, borderColor: "#3b82f6", backgroundColor: "transparent" },
+  text: { color: "#18181b", thickness: 4, opacity: 100 },
+  fill: { color: "#ef4444", thickness: 1, opacity: 100 },
+}
+
 export default function Home() {
   const [pages, setPages] = useState<Page[]>([
     { id: 1, name: "Page 1", hasAnnotations: false },
@@ -23,10 +40,19 @@ export default function Home() {
   const [zoom, setZoom] = useState(100)
   const [activeTool, setActiveTool] = useState<Tool>("select")
   const [activeShape, setActiveShape] = useState<ShapeType>("rectangle")
-  const [selectedColor, setSelectedColor] = useState("#18181b")
-  const [thickness, setThickness] = useState(3)
-  const [opacity, setOpacity] = useState(100)
   const [pendingSymbol, setPendingSymbol] = useState<string | null>(null)
+  
+  const [toolSettings, setToolSettings] = useState<Record<string, ToolSettings>>(defaultToolSettings)
+  
+  const currentSettings = toolSettings[activeTool] || toolSettings.pen
+  
+  const updateCurrentToolSettings = useCallback((updates: Partial<ToolSettings>) => {
+    const toolKey = activeTool === "select" || activeTool === "pan" || activeTool === "math" ? "pen" : activeTool
+    setToolSettings(prev => ({
+      ...prev,
+      [toolKey]: { ...prev[toolKey], ...updates }
+    }))
+  }, [activeTool])
 
   const handleAddPage = useCallback(() => {
     const newId = Math.max(...pages.map(p => p.id)) + 1
@@ -138,9 +164,7 @@ export default function Home() {
             }}
             activeTool={activeTool}
             activeShape={activeShape}
-            strokeColor={selectedColor}
-            strokeThickness={thickness}
-            strokeOpacity={opacity}
+            toolSettings={toolSettings}
             pendingSymbol={pendingSymbol}
             onSymbolPlaced={() => {
               setPendingSymbol(null)
@@ -148,12 +172,9 @@ export default function Home() {
             }}
           />
           <Inspector
-            selectedColor={selectedColor}
-            onColorChange={setSelectedColor}
-            thickness={thickness}
-            onThicknessChange={setThickness}
-            opacity={opacity}
-            onOpacityChange={setOpacity}
+            activeTool={activeTool}
+            currentSettings={currentSettings}
+            onSettingsChange={updateCurrentToolSettings}
           />
         </div>
         <Dock

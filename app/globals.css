@@ -115,8 +115,41 @@
 @layer base {
   * {
     @apply border-border outline-ring/50;
+    cursor: url('/cursors/cursor-default.svg') 2 2, auto;
   }
   body {
     @apply bg-background text-foreground;
+  }
+  a,
+  button,
+  [role="button"],
+  [data-cursor="pointer"],
+  .cursor-pointer {
+    cursor: url('/cursors/cursor-pointer.svg') 10 4, pointer;
+  }
+  [data-cursor="grab"],
+  .cursor-grab {
+    cursor: url('/cursors/cursor-grab.svg') 12 12, grab;
+  }
+  [data-cursor="grabbing"],
+  .cursor-grabbing {
+    cursor: url('/cursors/cursor-grabbing.svg') 12 12, grabbing;
+  }
+  [data-cursor="cell"],
+  .cursor-cell {
+    cursor: url('/cursors/cursor-cell.svg') 12 12, cell;
+  }
+  [data-cursor="zoom-in"],
+  .cursor-zoom-in {
+    cursor: url('/cursors/cursor-zoom-in.svg') 10 9, zoom-in;
+  }
+  [data-cursor="zoom-out"],
+  .cursor-zoom-out {
+    cursor: url('/cursors/cursor-zoom-out.svg') 10 9, zoom-out;
+  }
+  input,
+  textarea,
+  [contenteditable="true"] {
+    cursor: text;
   }
 }
