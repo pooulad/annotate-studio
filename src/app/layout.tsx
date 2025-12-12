@@ -1,3 +1,5 @@
+"use client"
+
 import type { Metadata } from "next"
 import { Geist, Geist_Mono } from "next/font/google"
 import "./globals.css"
@@ -11,11 +13,6 @@ const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
 })
-
-export const metadata: Metadata = {
-  title: "Annotate Studio - Modern Annotation Tool",
-  description: "A modern, open-source annotation and drawing tool with a beautiful UI",
-}
 
 export default function RootLayout({
   children,
@@ -32,7 +29,7 @@ export default function RootLayout({
       </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} font-sans antialiased`}
-      >
+      > 
         {children}
       </body>
     </html>
