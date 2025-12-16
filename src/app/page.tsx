@@ -7,7 +7,7 @@ import { Dock, type Tool, type ShapeType } from "@/components/Dock"
 import { Sidebar } from "@/components/Sidebar"
 import { Inspector } from "@/components/Inspector"
 import { ThemeProvider } from "@/components/ThemeProvider"
-import { useCanvasStore } from "@/lib/store"
+import { useCanvasStore, usePdfStore } from "@/lib/store"
 
 interface Page {
   id: number
@@ -71,6 +71,25 @@ export default function Home() {
 
 
   const { undo, redo, canUndo, canRedo } = useCanvasStore()
+  const { pagesMeta } = usePdfStore()
+
+  const handlePdfLoaded = useCallback(() => {
+    if (pagesMeta && pagesMeta.length > 0) {
+      const newPages = pagesMeta.map((p) => ({
+        id: p.pageNumber,
+        name: `Page ${p.pageNumber}`,
+        hasAnnotations: false,
+      }))
+      setPages(newPages)
+      setCurrentPage(1)
+    }
+  }, [pagesMeta])
+
+  useEffect(() => {
+    if (pagesMeta && pagesMeta.length > 0) {
+      handlePdfLoaded()
+    }
+  }, [pagesMeta, handlePdfLoaded])
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -138,6 +157,7 @@ export default function Home() {
           onZoomIn={() => setZoom(prev => Math.min(prev + 25, 400))}
           onZoomOut={() => setZoom(prev => Math.max(prev - 25, 25))}
           onResetZoom={() => setZoom(100)}
+          onPdfLoaded={handlePdfLoaded}
         />
         <div className="relative flex flex-1 overflow-hidden">
           <Sidebar

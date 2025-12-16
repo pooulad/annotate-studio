@@ -1,10 +1,11 @@
 "use client"
 
 import { useState } from "react"
-import { FileText, Download, Sparkles, Keyboard, Info, FilePlus, FolderOpen, Save, Undo2, Redo2, Scissors, Copy, ClipboardPaste, ZoomIn, ZoomOut, Maximize, Expand, Github, ExternalLink } from "lucide-react"
+import { FileText, Download, Sparkles, Keyboard, Info, FilePlus, FolderOpen, Save, Undo2, Redo2, Scissors, Copy, ClipboardPaste, ZoomIn, ZoomOut, Maximize, Expand, Github, ExternalLink, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ThemeToggle } from "@/components/ThemeToggle"
-import { useCanvasStore } from "@/lib/store"
+import { useCanvasStore, usePdfStore } from "@/lib/store"
+import { openPdfDialog, openPdf } from "@/lib/tauri"
 import {
   Menubar,
   MenubarContent,
@@ -56,12 +57,47 @@ interface HeaderProps {
   onZoomOut?: () => void
   onResetZoom?: () => void
   onFullScreen?: () => void
+  onPdfLoaded?: () => void
 }
 
-export function Header({ onNewFile, onZoomIn, onZoomOut, onResetZoom, onFullScreen }: HeaderProps) {
+export function Header({ onNewFile, onZoomIn, onZoomOut, onResetZoom, onFullScreen, onPdfLoaded }: HeaderProps) {
   const [showShortcuts, setShowShortcuts] = useState(false)
   const [showAbout, setShowAbout] = useState(false)
   const { undo, redo, canUndo, canRedo } = useCanvasStore()
+  const { setPdfPath, setPagesMeta, setLoading, setError, isLoading, clearPdf } = usePdfStore()
+
+  const handleOpenPdf = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+      clearPdf()
+      
+      const filePath = await openPdfDialog()
+      if (!filePath) {
+        setLoading(false)
+        return
+      }
+
+      const pdfInfo = await openPdf(filePath)
+      
+      if (pdfInfo) {
+        setPdfPath(pdfInfo.path)
+        setPagesMeta(
+          pdfInfo.pages_meta.map((p) => ({
+            pageNumber: p.page_number,
+            width: p.width,
+            height: p.height,
+          }))
+        )
+        onPdfLoaded?.()
+      }
+    } catch (err) {
+      console.error("[Frontend] Error:", err)
+      setError(err instanceof Error ? err.message : "Failed to open PDF")
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const handleFullScreen = () => {
     if (document.fullscreenElement) {
@@ -92,9 +128,9 @@ export function Header({ onNewFile, onZoomIn, onZoomOut, onResetZoom, onFullScre
                 <FilePlus className="h-4 w-4" />
                 New <MenubarShortcut>Ctrl+N</MenubarShortcut>
               </MenubarItem>
-              <MenubarItem className="gap-2 transition-colors">
-                <FolderOpen className="h-4 w-4" />
-                Open <MenubarShortcut>Ctrl+O</MenubarShortcut>
+              <MenubarItem className="gap-2 transition-colors" onClick={handleOpenPdf} disabled={isLoading}>
+                {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderOpen className="h-4 w-4" />}
+                Open PDF <MenubarShortcut>Ctrl+O</MenubarShortcut>
               </MenubarItem>
               <MenubarSeparator />
               <MenubarItem className="gap-2 transition-colors">

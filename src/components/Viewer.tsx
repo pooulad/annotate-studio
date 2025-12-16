@@ -18,7 +18,7 @@ import {
   RotateCcw,
 } from "lucide-react"
 import type { Tool, ShapeType } from "@/components/Dock"
-import { useCanvasStore } from "@/lib/store"
+import { useCanvasStore, usePdfStore } from "@/lib/store"
 
 interface Point {
   x: number
@@ -231,8 +231,10 @@ export function Viewer({
   const [isResizing, setIsResizing] = useState(false)
   const [resizeCorner, setResizeCorner] = useState<'tl' | 'tr' | 'bl' | 'br' | null>(null)
   const [isZooming, setIsZooming] = useState<'in' | 'out' | null>(null)
+  const [pdfImage, setPdfImage] = useState<HTMLImageElement | null>(null)
 
   const { strokes, addStroke, updateStroke, deleteStroke, selectStroke, selectedStrokeId, getStrokeById, undo, redo, canUndo, canRedo, getPageStrokes } = useCanvasStore()
+  const { pdfPath, pagesMeta, renderedPages, setRenderedPage, loadingPage, setLoadingPage } = usePdfStore()
 
   const handleTextSubmit = useCallback(() => {
     if (textInput && textInput.value.trim()) {
@@ -249,9 +251,50 @@ export function Viewer({
     setTextInput(null)
   }, [textInput, getToolSettings, currentPage, addStroke])
 
-  const canvasWidth = 595
-  const canvasHeight = 842
+  const currentPageMeta = pagesMeta.find((p) => p.pageNumber === currentPage)
+  const currentPageImage = renderedPages.get(currentPage)
+  const canvasWidth = currentPageMeta ? Math.round(currentPageMeta.width) : 595
+  const canvasHeight = currentPageMeta ? Math.round(currentPageMeta.height) : 842
   const scale = zoom / 100
+
+  useEffect(() => {
+    const loadPage = async (pageNum: number) => {
+      if (!pdfPath) return
+      if (renderedPages.has(pageNum)) return
+      
+      try {
+        const { renderPdfPage } = await import("@/lib/tauri")
+        const result = await renderPdfPage(pdfPath, pageNum, 1600)
+        if (result) {
+          setRenderedPage(pageNum, result.image_data)
+        }
+      } catch (err) {
+        console.error("Failed to render page:", err)
+      }
+    }
+    
+    if (!pdfPath || !currentPageMeta) return
+    
+    loadPage(currentPage)
+    
+    const totalPages = pagesMeta.length
+    if (currentPage > 1) {
+      loadPage(currentPage - 1)
+    }
+    if (currentPage < totalPages) {
+      loadPage(currentPage + 1)
+    }
+  }, [currentPage, pdfPath, currentPageMeta, pagesMeta.length, renderedPages, setRenderedPage])
+
+  useEffect(() => {
+    if (currentPageImage) {
+      const img = new Image()
+      img.onload = () => setPdfImage(img)
+      img.src = currentPageImage
+    } else {
+      setPdfImage(null)
+    }
+  }, [currentPageImage])
 
   const handleZoomIn = useCallback(() => {
     onZoomChange(Math.min(zoom + 25, 400))
@@ -302,21 +345,32 @@ export function Viewer({
     return null
   }, [])
 
-  const findStrokeAtPoint = useCallback((point: Point): string | null => {
+  const findStrokeAtPoint = useCallback((point: Point, eraserMode: boolean = false): string | null => {
     const pageStrokes = getPageStrokes(currentPage)
+    const eraserRadius = eraserMode ? 15 : 10
+    
     for (let i = pageStrokes.length - 1; i >= 0; i--) {
       const stroke = pageStrokes[i]
-      const bounds = getStrokeBounds(stroke)
       
-      if (bounds) {
-        const padding = 10
-        if (
-          point.x >= bounds.minX - padding &&
-          point.x <= bounds.maxX + padding &&
-          point.y >= bounds.minY - padding &&
-          point.y <= bounds.maxY + padding
-        ) {
-          return stroke.id
+      if (stroke.tool === "pen" || stroke.tool === "highlighter") {
+        for (const p of stroke.points) {
+          const dist = Math.sqrt((point.x - p.x) ** 2 + (point.y - p.y) ** 2)
+          if (dist <= eraserRadius + stroke.thickness / 2) {
+            return stroke.id
+          }
+        }
+      } else {
+        const bounds = getStrokeBounds(stroke)
+        if (bounds) {
+          const padding = eraserRadius
+          if (
+            point.x >= bounds.minX - padding &&
+            point.x <= bounds.maxX + padding &&
+            point.y >= bounds.minY - padding &&
+            point.y <= bounds.maxY + padding
+          ) {
+            return stroke.id
+          }
         }
       }
     }
@@ -528,8 +582,16 @@ export function Viewer({
       return
     }
 
+    if (activeTool === "eraser") {
+      const strokeId = findStrokeAtPoint(point, true)
+      if (strokeId) {
+        deleteStroke(strokeId)
+      }
+      return
+    }
+
     setCurrentStroke(prev => [...prev, point])
-  }, [isDrawing, isPanning, isDragging, isResizing, resizeCorner, lastPanPoint, getCanvasPoint, activeTool, pendingSymbol, symbolStart, selectedStrokeId, dragOffset, updateStroke, getStrokeById, getStrokeBounds])
+  }, [isDrawing, isPanning, isDragging, isResizing, resizeCorner, lastPanPoint, getCanvasPoint, activeTool, pendingSymbol, symbolStart, selectedStrokeId, dragOffset, updateStroke, getStrokeById, getStrokeBounds, findStrokeAtPoint, deleteStroke])
 
   const stopDrawing = useCallback(() => {
     if (isResizing) {
@@ -593,10 +655,16 @@ export function Viewer({
       return
     }
 
+    if (activeTool === "eraser") {
+      setCurrentStroke([])
+      setIsDrawing(false)
+      return
+    }
+
     const currentToolSettings = getToolSettings(activeTool)
     addStroke({
       points: currentStroke,
-      color: activeTool === "eraser" ? "#ffffff" : currentToolSettings.color,
+      color: currentToolSettings.color,
       thickness: currentToolSettings.thickness,
       opacity: currentToolSettings.opacity,
       tool: activeTool,
@@ -654,22 +722,26 @@ export function Viewer({
 
     ctx.clearRect(0, 0, canvasWidth, canvasHeight)
 
-    ctx.fillStyle = "#ffffff"
-    ctx.fillRect(0, 0, canvasWidth, canvasHeight)
+    if (pdfImage) {
+      ctx.drawImage(pdfImage, 0, 0, canvasWidth, canvasHeight)
+    } else {
+      ctx.fillStyle = "#ffffff"
+      ctx.fillRect(0, 0, canvasWidth, canvasHeight)
 
-    ctx.strokeStyle = "#e4e4e7"
-    ctx.lineWidth = 0.5
-    for (let x = 0; x <= canvasWidth; x += 20) {
-      ctx.beginPath()
-      ctx.moveTo(x, 0)
-      ctx.lineTo(x, canvasHeight)
-      ctx.stroke()
-    }
-    for (let y = 0; y <= canvasHeight; y += 20) {
-      ctx.beginPath()
-      ctx.moveTo(0, y)
-      ctx.lineTo(canvasWidth, y)
-      ctx.stroke()
+      ctx.strokeStyle = "#e4e4e7"
+      ctx.lineWidth = 0.5
+      for (let x = 0; x <= canvasWidth; x += 20) {
+        ctx.beginPath()
+        ctx.moveTo(x, 0)
+        ctx.lineTo(x, canvasHeight)
+        ctx.stroke()
+      }
+      for (let y = 0; y <= canvasHeight; y += 20) {
+        ctx.beginPath()
+        ctx.moveTo(0, y)
+        ctx.lineTo(canvasWidth, y)
+        ctx.stroke()
+      }
     }
 
     ctx.strokeStyle = "#d4d4d8"
@@ -804,11 +876,11 @@ export function Viewer({
       }
     })
 
-    if (currentStroke.length > 0) {
+    if (currentStroke.length > 0 && activeTool !== "eraser") {
       const currentToolSettings = getToolSettings(activeTool)
       drawStroke({
         points: currentStroke,
-        color: activeTool === "eraser" ? "#ffffff" : currentToolSettings.color,
+        color: currentToolSettings.color,
         thickness: currentToolSettings.thickness,
         opacity: currentToolSettings.opacity,
       })
@@ -839,7 +911,7 @@ export function Viewer({
       ctx.strokeRect(symbolStart.x - 4, symbolStart.y - 4, size + 8, size + 8)
       ctx.setLineDash([])
     }
-  }, [strokes, currentStroke, activeTool, getToolSettings, currentPage, getPageStrokes, shapeStart, shapeEnd, isDrawing, activeShape, selectedStrokeId, symbolStart, symbolEnd, pendingSymbol, getStrokeBounds])
+  }, [strokes, currentStroke, activeTool, getToolSettings, currentPage, getPageStrokes, shapeStart, shapeEnd, isDrawing, activeShape, selectedStrokeId, symbolStart, symbolEnd, pendingSymbol, getStrokeBounds, pdfImage, canvasWidth, canvasHeight])
 
   const getCursor = useCallback(() => {
     if (isZooming === 'in') return "url('/cursors/cursor-zoom-in.svg') 10 9, zoom-in"
@@ -1004,10 +1076,6 @@ export function Viewer({
                 "dark:shadow-black/50"
               )}
               style={{ cursor: getCursor() }}
-              onMouseDown={startDrawing}
-              onMouseMove={draw}
-              onMouseUp={stopDrawing}
-              onMouseLeave={stopDrawing}
             />
 
             <div className="pointer-events-none absolute -inset-4 rounded-sm border-2 border-dashed border-violet-500/20" />

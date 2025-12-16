@@ -4,8 +4,14 @@
   "version": "0.1.0",
   "identifier": "com.annotate-studio",
   "build": {
-    "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build",
+    "beforeDevCommand": {
+      "script": "npm run dev",
+      "cwd": "../src"
+    },
+    "beforeBuildCommand": {
+      "script": "npm run build",
+      "cwd": "../src"
+    },
     "devUrl": "http://localhost:3000",
     "frontendDist": "../src/out"
   },
@@ -15,11 +21,14 @@
       {
         "title": "Annotate Studio",
         "width": 1200,
-        "height": 700
+        "height": 800,
+        "minWidth": 800,
+        "minHeight": 600,
+        "center": true
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' ipc: http://ipc.localhost"
     }
   },
   "bundle": {
@@ -31,6 +40,12 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "resources": {
+      "libs/pdfium/windows-x64/pdfium.dll": "./",
+      "libs/pdfium/linux-x64/libpdfium.so": "./",
+      "libs/pdfium/macos-x64/libpdfium.dylib": "./",
+      "libs/pdfium/macos-arm64/libpdfium.dylib": "./"
+    }
   }
 }

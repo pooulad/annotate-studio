@@ -3,6 +3,61 @@
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
 
+interface PdfPageMeta {
+  pageNumber: number
+  width: number
+  height: number
+}
+
+interface PdfPageRendered {
+  pageNumber: number
+  width: number
+  height: number
+  imageData: string
+}
+
+interface PdfStore {
+  pdfPath: string | null
+  pagesMeta: PdfPageMeta[]
+  renderedPages: Map<number, string>
+  totalPages: number
+  isLoading: boolean
+  loadingPage: number | null
+  error: string | null
+  setPdfPath: (path: string | null) => void
+  setPagesMeta: (pages: PdfPageMeta[]) => void
+  setRenderedPage: (pageNumber: number, imageData: string) => void
+  getRenderedPage: (pageNumber: number) => string | undefined
+  setTotalPages: (count: number) => void
+  setLoading: (loading: boolean) => void
+  setLoadingPage: (page: number | null) => void
+  setError: (error: string | null) => void
+  clearPdf: () => void
+}
+
+export const usePdfStore = create<PdfStore>()((set, get) => ({
+  pdfPath: null,
+  pagesMeta: [],
+  renderedPages: new Map(),
+  totalPages: 0,
+  isLoading: false,
+  loadingPage: null,
+  error: null,
+  setPdfPath: (path) => set({ pdfPath: path }),
+  setPagesMeta: (pages) => set({ pagesMeta: pages, totalPages: pages.length }),
+  setRenderedPage: (pageNumber, imageData) => {
+    const newMap = new Map(get().renderedPages)
+    newMap.set(pageNumber, imageData)
+    set({ renderedPages: newMap })
+  },
+  getRenderedPage: (pageNumber) => get().renderedPages.get(pageNumber),
+  setTotalPages: (count) => set({ totalPages: count }),
+  setLoading: (loading) => set({ isLoading: loading }),
+  setLoadingPage: (page) => set({ loadingPage: page }),
+  setError: (error) => set({ error }),
+  clearPdf: () => set({ pdfPath: null, pagesMeta: [], renderedPages: new Map(), totalPages: 0, error: null }),
+}))
+
 interface ColorStore {
   customColors: string[]
   addCustomColor: (color: string) => void

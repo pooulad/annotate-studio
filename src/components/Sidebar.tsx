@@ -11,6 +11,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import { usePdfStore } from "@/lib/store"
 
 interface Page {
   id: number
@@ -28,6 +29,7 @@ interface SidebarProps {
 
 export function Sidebar({ currentPage, onPageChange, pages, onAddPage, onDeletePage }: SidebarProps) {
   const [isCollapsed, setIsCollapsed] = useState(false)
+  const { pagesMeta } = usePdfStore()
 
   if (isCollapsed) {
     return (
@@ -53,7 +55,7 @@ export function Sidebar({ currentPage, onPageChange, pages, onAddPage, onDeleteP
 
   return (
     <TooltipProvider delayDuration={0}>
-      <aside className="absolute left-4 top-20 z-20 flex max-h-[calc(100vh-160px)] w-48 flex-col rounded-2xl border border-border/50 bg-background/95 shadow-2xl backdrop-blur-xl transition-all duration-300 dark:bg-zinc-900/95">
+      <aside className="absolute left-4 top-20 z-20 flex h-[calc(100vh-160px)] w-48 flex-col rounded-2xl border border-border/50 bg-background/95 shadow-2xl backdrop-blur-xl transition-all duration-300 dark:bg-zinc-900/95">
         <div className="flex h-12 shrink-0 items-center justify-between border-b border-border/50 px-3">
           <div className="flex items-center gap-2">
             <Layers className="h-4 w-4 text-muted-foreground" />
@@ -89,8 +91,8 @@ export function Sidebar({ currentPage, onPageChange, pages, onAddPage, onDeleteP
           </div>
         </div>
 
-        <ScrollArea className="flex-1 p-2">
-          <div className="flex flex-col gap-1.5">
+        <ScrollArea className="flex-1 min-h-0">
+          <div className="flex flex-col gap-1.5 p-2">
             {pages.map((page, index) => (
               <button
                 key={page.id}
