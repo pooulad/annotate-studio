@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useRef, useState, useEffect } from "react"
+import { useCallback, useRef, useState, useEffect, memo } from "react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import {
@@ -19,157 +19,11 @@ import {
 } from "lucide-react"
 import type { Tool, ShapeType } from "@/components/Dock"
 import { useCanvasStore, usePdfStore } from "@/lib/store"
+import * as wasmEngine from "@/lib/wasm-engine"
 
 interface Point {
   x: number
   y: number
-}
-
-interface ShapeData {
-  type: string
-  start: Point
-  end: Point
-}
-
-function drawShape(ctx: CanvasRenderingContext2D, shape: ShapeData, color: string, thickness: number, opacity: number, fillColor?: string) {
-  ctx.globalAlpha = opacity / 100
-  ctx.strokeStyle = color
-  ctx.lineWidth = thickness
-  ctx.lineCap = "round"
-  ctx.lineJoin = "round"
-  
-  const { start, end, type } = shape
-  const centerX = (start.x + end.x) / 2
-  const centerY = (start.y + end.y) / 2
-  const width = Math.abs(end.x - start.x)
-  const height = Math.abs(end.y - start.y)
-  const minX = Math.min(start.x, end.x)
-  const minY = Math.min(start.y, end.y)
-  
-  ctx.beginPath()
-  
-  switch (type) {
-    case "rectangle":
-      if (fillColor) {
-        ctx.fillStyle = fillColor
-        ctx.fillRect(minX, minY, width, height)
-      }
-      ctx.strokeRect(minX, minY, width, height)
-      ctx.globalAlpha = 1
-      return
-      
-    case "circle":
-      ctx.ellipse(centerX, centerY, width / 2, height / 2, 0, 0, Math.PI * 2)
-      if (fillColor) {
-        ctx.fillStyle = fillColor
-        ctx.fill()
-      }
-      ctx.stroke()
-      break
-      
-    case "line":
-      ctx.moveTo(start.x, start.y)
-      ctx.lineTo(end.x, end.y)
-      ctx.stroke()
-      break
-      
-    case "arrow":
-      ctx.moveTo(start.x, start.y)
-      ctx.lineTo(end.x, end.y)
-      ctx.stroke()
-      
-      const arrowAngle = Math.atan2(end.y - start.y, end.x - start.x)
-      const arrowLen = 12 + thickness
-      const arrowSpread = Math.PI / 7
-      
-      ctx.beginPath()
-      ctx.moveTo(end.x, end.y)
-      ctx.lineTo(end.x - arrowLen * Math.cos(arrowAngle - arrowSpread), end.y - arrowLen * Math.sin(arrowAngle - arrowSpread))
-      ctx.moveTo(end.x, end.y)
-      ctx.lineTo(end.x - arrowLen * Math.cos(arrowAngle + arrowSpread), end.y - arrowLen * Math.sin(arrowAngle + arrowSpread))
-      ctx.stroke()
-      break
-      
-    case "triangle":
-      ctx.moveTo(centerX, minY)
-      ctx.lineTo(minX + width, minY + height)
-      ctx.lineTo(minX, minY + height)
-      ctx.closePath()
-      if (fillColor) {
-        ctx.fillStyle = fillColor
-        ctx.fill()
-      }
-      ctx.stroke()
-      break
-      
-    case "star":
-      const outerRadius = Math.min(width, height) / 2
-      const innerRadius = outerRadius * 0.4
-      const spikes = 5
-      let rot = -Math.PI / 2
-      
-      ctx.moveTo(centerX + outerRadius * Math.cos(rot), centerY + outerRadius * Math.sin(rot))
-      for (let i = 0; i < spikes; i++) {
-        rot += Math.PI / spikes
-        ctx.lineTo(centerX + innerRadius * Math.cos(rot), centerY + innerRadius * Math.sin(rot))
-        rot += Math.PI / spikes
-        ctx.lineTo(centerX + outerRadius * Math.cos(rot), centerY + outerRadius * Math.sin(rot))
-      }
-      ctx.closePath()
-      if (fillColor) {
-        ctx.fillStyle = fillColor
-        ctx.fill()
-      }
-      ctx.stroke()
-      break
-      
-    case "diamond":
-      ctx.moveTo(centerX, minY)
-      ctx.lineTo(minX + width, centerY)
-      ctx.lineTo(centerX, minY + height)
-      ctx.lineTo(minX, centerY)
-      ctx.closePath()
-      if (fillColor) {
-        ctx.fillStyle = fillColor
-        ctx.fill()
-      }
-      ctx.stroke()
-      break
-      
-    case "heart":
-      const heartWidth = width / 2
-      const heartHeight = height / 2
-      
-      ctx.moveTo(centerX, minY + heartHeight * 0.3)
-      ctx.bezierCurveTo(
-        centerX, minY,
-        minX, minY,
-        minX, minY + heartHeight * 0.6
-      )
-      ctx.bezierCurveTo(
-        minX, minY + height * 0.8,
-        centerX, minY + height,
-        centerX, minY + height
-      )
-      ctx.bezierCurveTo(
-        centerX, minY + height,
-        minX + width, minY + height * 0.8,
-        minX + width, minY + heartHeight * 0.6
-      )
-      ctx.bezierCurveTo(
-        minX + width, minY,
-        centerX, minY,
-        centerX, minY + heartHeight * 0.3
-      )
-      if (fillColor) {
-        ctx.fillStyle = fillColor
-        ctx.fill()
-      }
-      ctx.stroke()
-      break
-  }
-  
-  ctx.globalAlpha = 1
 }
 
 interface ToolSettings {
@@ -194,6 +48,7 @@ interface ViewerProps {
   toolSettings: Record<string, ToolSettings>
   pendingSymbol?: string | null
   onSymbolPlaced?: () => void
+  onCanvasReady?: (canvas: HTMLCanvasElement | null) => void
 }
 
 export function Viewer({
@@ -209,12 +64,17 @@ export function Viewer({
   toolSettings,
   pendingSymbol,
   onSymbolPlaced,
+  onCanvasReady,
 }: ViewerProps) {
   const getToolSettings = (tool: string): ToolSettings => {
     return toolSettings[tool] || toolSettings.pen
   }
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  
+  useEffect(() => {
+    onCanvasReady?.(canvasRef.current)
+  }, [onCanvasReady])
   const [isDrawing, setIsDrawing] = useState(false)
   const [isPanning, setIsPanning] = useState(false)
   const [panOffset, setPanOffset] = useState<Point>({ x: 0, y: 0 })
@@ -232,9 +92,41 @@ export function Viewer({
   const [resizeCorner, setResizeCorner] = useState<'tl' | 'tr' | 'bl' | 'br' | null>(null)
   const [isZooming, setIsZooming] = useState<'in' | 'out' | null>(null)
   const [pdfImage, setPdfImage] = useState<HTMLImageElement | null>(null)
+  const [fps, setFps] = useState(0)
+  const [wasmReady, setWasmReady] = useState(false)
+  const rafIdRef = useRef<number | null>(null)
+  const fpsIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const [rubberBandStart, setRubberBandStart] = useState<Point | null>(null)
+  const [rubberBandEnd, setRubberBandEnd] = useState<Point | null>(null)
+  const [isRubberBanding, setIsRubberBanding] = useState(false)
+  
+  const [currentPressure, setCurrentPressure] = useState(0.5)
+  const activePointerId = useRef<number | null>(null)
 
-  const { strokes, addStroke, updateStroke, deleteStroke, selectStroke, selectedStrokeId, getStrokeById, undo, redo, canUndo, canRedo, getPageStrokes } = useCanvasStore()
-  const { pdfPath, pagesMeta, renderedPages, setRenderedPage, loadingPage, setLoadingPage } = usePdfStore()
+  const strokes = useCanvasStore(s => s.strokes)
+  const addStroke = useCanvasStore(s => s.addStroke)
+  const updateStroke = useCanvasStore(s => s.updateStroke)
+  const deleteStroke = useCanvasStore(s => s.deleteStroke)
+  const selectStroke = useCanvasStore(s => s.selectStroke)
+  const selectStrokes = useCanvasStore(s => s.selectStrokes)
+  const addToSelection = useCanvasStore(s => s.addToSelection)
+  const clearSelection = useCanvasStore(s => s.clearSelection)
+  const selectedStrokeId = useCanvasStore(s => s.selectedStrokeId)
+  const selectedStrokeIds = useCanvasStore(s => s.selectedStrokeIds)
+  const getStrokeById = useCanvasStore(s => s.getStrokeById)
+  const undo = useCanvasStore(s => s.undo)
+  const redo = useCanvasStore(s => s.redo)
+  const getPageStrokes = useCanvasStore(s => s.getPageStrokes)
+  const copySelected = useCanvasStore(s => s.copySelected)
+  const cutSelected = useCanvasStore(s => s.cutSelected)
+  const paste = useCanvasStore(s => s.paste)
+  const deleteSelectedStrokes = useCanvasStore(s => s.deleteSelectedStrokes)
+  const duplicateSelected = useCanvasStore(s => s.duplicateSelected)
+  
+  const pdfPath = usePdfStore(s => s.pdfPath)
+  const pagesMeta = usePdfStore(s => s.pagesMeta)
+  const renderedPages = usePdfStore(s => s.renderedPages)
+  const setRenderedPage = usePdfStore(s => s.setRenderedPage)
 
   const handleTextSubmit = useCallback(() => {
     if (textInput && textInput.value.trim()) {
@@ -257,33 +149,60 @@ export function Viewer({
   const canvasHeight = currentPageMeta ? Math.round(currentPageMeta.height) : 842
   const scale = zoom / 100
 
+  const pdfLoadingRef = useRef(false)
+  const pdfQueueRef = useRef<number[]>([])
+  
   useEffect(() => {
+    if (!pdfPath || !currentPageMeta) return
+    
+    let cancelled = false
+    
     const loadPage = async (pageNum: number) => {
-      if (!pdfPath) return
-      if (renderedPages.has(pageNum)) return
+      if (cancelled || renderedPages.has(pageNum)) return
       
       try {
         const { renderPdfPage } = await import("@/lib/tauri")
-        const result = await renderPdfPage(pdfPath, pageNum, 1600)
-        if (result) {
+        const result = await renderPdfPage(pdfPath, pageNum, 1200)
+        if (result && !cancelled) {
           setRenderedPage(pageNum, result.image_data)
         }
       } catch (err) {
-        console.error("Failed to render page:", err)
+        console.error("Failed to render page:", pageNum, err)
       }
     }
     
-    if (!pdfPath || !currentPageMeta) return
-    
-    loadPage(currentPage)
-    
-    const totalPages = pagesMeta.length
-    if (currentPage > 1) {
-      loadPage(currentPage - 1)
+    const processQueue = async () => {
+      if (pdfLoadingRef.current || pdfQueueRef.current.length === 0 || cancelled) return
+      
+      pdfLoadingRef.current = true
+      const pageNum = pdfQueueRef.current.shift()!
+      
+      await loadPage(pageNum)
+      
+      pdfLoadingRef.current = false
+      
+      if (!cancelled && pdfQueueRef.current.length > 0) {
+        setTimeout(processQueue, 16)
+      }
     }
-    if (currentPage < totalPages) {
-      loadPage(currentPage + 1)
+    
+    pdfQueueRef.current = []
+    
+    if (!renderedPages.has(currentPage)) {
+      pdfQueueRef.current.push(currentPage)
     }
+    
+    const total = pagesMeta.length
+    if (currentPage > 1 && !renderedPages.has(currentPage - 1)) {
+      pdfQueueRef.current.push(currentPage - 1)
+    }
+    if (currentPage < total && !renderedPages.has(currentPage + 1)) {
+      pdfQueueRef.current.push(currentPage + 1)
+    }
+    
+    processQueue()
+    
+    return () => { cancelled = true }
   }, [currentPage, pdfPath, currentPageMeta, pagesMeta.length, renderedPages, setRenderedPage])
 
   useEffect(() => {
@@ -295,6 +214,185 @@ export function Viewer({
       setPdfImage(null)
     }
   }, [currentPageImage])
+
+  const fpsRef = useRef(0)
+  
+  useEffect(() => {
+    let mounted = true
+    async function init() {
+      const success = await wasmEngine.initWasm()
+      if (mounted && success) {
+        wasmEngine.createEngine(canvasWidth, canvasHeight)
+        setWasmReady(true)
+      }
+    }
+    init()
+
+    fpsIntervalRef.current = setInterval(() => {
+      const currentFps = Math.round(wasmEngine.getFps())
+      if (Math.abs(currentFps - fpsRef.current) > 2) {
+        fpsRef.current = currentFps
+        setFps(currentFps)
+      }
+    }, 1000)
+
+    return () => {
+      mounted = false
+      if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current)
+      if (fpsIntervalRef.current) clearInterval(fpsIntervalRef.current)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (wasmReady) {
+      wasmEngine.resize(canvasWidth, canvasHeight)
+    }
+  }, [canvasWidth, canvasHeight, wasmReady])
+
+  const strokesVersionRef = useRef(0)
+  
+  useEffect(() => {
+    if (!wasmReady) return
+    
+    strokesVersionRef.current++
+    const version = strokesVersionRef.current
+    
+    requestAnimationFrame(() => {
+      if (version !== strokesVersionRef.current) return
+      
+      const pageStrokes = getPageStrokes(currentPage)
+      const wasmStrokes = pageStrokes.map(s => ({
+        id: s.id,
+        points: s.points,
+        color: s.color,
+        thickness: s.thickness,
+        opacity: s.opacity,
+        tool: s.tool,
+        fill_color: s.fillColor || s.backgroundColor,
+      }))
+      wasmEngine.setStrokes(wasmStrokes)
+      wasmEngine.setSelectedIds(selectedStrokeIds)
+      needsRenderRef.current = true
+    })
+  }, [wasmReady, strokes, currentPage, getPageStrokes, selectedStrokeIds])
+
+  useEffect(() => {
+    if (!wasmReady) return
+    
+    const style = currentStroke.length > 0 ? {
+      color: getToolSettings(activeTool).color,
+      thickness: getToolSettings(activeTool).thickness,
+      opacity: getToolSettings(activeTool).opacity,
+    } : null
+    wasmEngine.setCurrentStroke(currentStroke, style)
+    needsRenderRef.current = true
+  }, [wasmReady, currentStroke, activeTool, getToolSettings])
+
+  useEffect(() => {
+    if (!wasmReady) return
+    
+    if (shapeStart && shapeEnd && isDrawing && activeTool === "shapes") {
+      const settings = getToolSettings("shapes")
+      wasmEngine.setShapePreview({
+        shape_type: activeShape,
+        start: shapeStart,
+        end: shapeEnd,
+        color: settings.borderColor || settings.color,
+        thickness: settings.thickness,
+        opacity: settings.opacity,
+        fill_color: settings.backgroundColor !== "transparent" ? settings.backgroundColor : undefined,
+      })
+    } else {
+      wasmEngine.setShapePreview(null)
+    }
+    needsRenderRef.current = true
+  }, [wasmReady, shapeStart, shapeEnd, isDrawing, activeTool, activeShape, getToolSettings])
+
+  useEffect(() => {
+    if (!wasmReady) return
+    
+    if (symbolStart && symbolEnd && isDrawing && pendingSymbol) {
+      const settings = getToolSettings("text")
+      wasmEngine.setSymbolPreview({
+        symbol: pendingSymbol,
+        start: symbolStart,
+        end: symbolEnd,
+        color: settings.color,
+        opacity: settings.opacity,
+      })
+    } else {
+      wasmEngine.setSymbolPreview(null)
+    }
+    needsRenderRef.current = true
+  }, [wasmReady, symbolStart, symbolEnd, isDrawing, pendingSymbol, getToolSettings])
+
+  const pdfCanvasRef = useRef<HTMLCanvasElement | null>(null)
+  const lastPdfImageRef = useRef<HTMLImageElement | null>(null)
+  const needsRenderRef = useRef(true)
+  const isActiveRef = useRef(false)
+  
+  useEffect(() => {
+    isActiveRef.current = isDrawing || isPanning || isDragging || isResizing
+  }, [isDrawing, isPanning, isDragging, isResizing])
+  
+  useEffect(() => {
+    needsRenderRef.current = true
+  }, [strokes, selectedStrokeId, currentStroke, shapeStart, shapeEnd, symbolStart, symbolEnd])
+  
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas || !wasmReady) return
+    
+    const ctx = canvas.getContext("2d", { alpha: false, desynchronized: true })
+    if (!ctx) return
+
+    let running = true
+    
+    if (!pdfCanvasRef.current) {
+      pdfCanvasRef.current = document.createElement("canvas")
+    }
+    const pdfCanvas = pdfCanvasRef.current
+    pdfCanvas.width = canvasWidth
+    pdfCanvas.height = canvasHeight
+    const pdfCtx = pdfCanvas.getContext("2d", { alpha: false })
+    
+    if (pdfImage && pdfCtx && pdfImage !== lastPdfImageRef.current) {
+      pdfCtx.drawImage(pdfImage, 0, 0, canvasWidth, canvasHeight)
+      lastPdfImageRef.current = pdfImage
+      needsRenderRef.current = true
+    }
+    
+    let lastTime = 0
+    const targetFrameTime = 1000 / 60
+    
+    const renderLoop = (timestamp: number) => {
+      if (!running) return
+      
+      const delta = timestamp - lastTime
+      
+      if (delta >= targetFrameTime || isActiveRef.current) {
+        lastTime = timestamp
+        wasmEngine.recordFrame(timestamp)
+        
+        if (needsRenderRef.current || isActiveRef.current) {
+          if (pdfImage) {
+            ctx.drawImage(pdfCanvas, 0, 0)
+          }
+          wasmEngine.render(ctx, !!pdfImage)
+          needsRenderRef.current = false
+        }
+      }
+      
+      rafIdRef.current = requestAnimationFrame(renderLoop)
+    }
+    
+    rafIdRef.current = requestAnimationFrame(renderLoop)
+    
+    return () => {
+      running = false
+      if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current)
+    }
+  }, [wasmReady, pdfImage, canvasWidth, canvasHeight])
 
   const handleZoomIn = useCallback(() => {
     onZoomChange(Math.min(zoom + 25, 400))
@@ -309,15 +407,23 @@ export function Viewer({
     setPanOffset({ x: 0, y: 0 })
   }, [onZoomChange])
 
-  const getCanvasPoint = useCallback((e: React.MouseEvent | MouseEvent): Point => {
+  const getCanvasPoint = useCallback((e: React.MouseEvent | MouseEvent | React.PointerEvent | PointerEvent): Point => {
     const canvas = canvasRef.current
     if (!canvas) return { x: 0, y: 0 }
     const rect = canvas.getBoundingClientRect()
+    
     return {
       x: (e.clientX - rect.left) / scale,
       y: (e.clientY - rect.top) / scale,
     }
   }, [scale])
+
+  const getPointerPressure = useCallback((e: React.PointerEvent | PointerEvent): number => {
+    if ('pressure' in e && e.pressure > 0) {
+      return e.pressure
+    }
+    return 0.5
+  }, [])
 
   const getStrokeBounds = useCallback((stroke: any): { minX: number, minY: number, maxX: number, maxY: number } | null => {
     if (!stroke || stroke.points.length < 1) return null
@@ -349,6 +455,14 @@ export function Viewer({
     const pageStrokes = getPageStrokes(currentPage)
     const eraserRadius = eraserMode ? 15 : 10
     
+    if (wasmReady) {
+      const idx = wasmEngine.hitTest(point.x * scale, point.y * scale, eraserRadius)
+      if (idx >= 0 && idx < pageStrokes.length) {
+        return pageStrokes[idx].id
+      }
+      return null
+    }
+    
     for (let i = pageStrokes.length - 1; i >= 0; i--) {
       const stroke = pageStrokes[i]
       
@@ -375,7 +489,7 @@ export function Viewer({
       }
     }
     return null
-  }, [getPageStrokes, currentPage, getStrokeBounds])
+  }, [getPageStrokes, currentPage, getStrokeBounds, wasmReady, scale])
 
   const getResizeCorner = useCallback((point: Point, stroke: any): 'tl' | 'tr' | 'bl' | 'br' | null => {
     const bounds = getStrokeBounds(stroke)
@@ -402,8 +516,64 @@ export function Viewer({
     return null
   }, [getStrokeBounds])
 
-  const startDrawing = useCallback((e: React.MouseEvent) => {
+  const findStrokesInRect = useCallback((start: Point, end: Point): string[] => {
+    const pageStrokes = getPageStrokes(currentPage)
+    const rectMinX = Math.min(start.x, end.x)
+    const rectMinY = Math.min(start.y, end.y)
+    const rectMaxX = Math.max(start.x, end.x)
+    const rectMaxY = Math.max(start.y, end.y)
+    
+    const result: string[] = []
+    
+    for (const stroke of pageStrokes) {
+      let isInside = false
+      
+      if (stroke.tool === "pen" || stroke.tool === "highlighter") {
+        for (const p of stroke.points) {
+          if (p.x >= rectMinX && p.x <= rectMaxX && p.y >= rectMinY && p.y <= rectMaxY) {
+            isInside = true
+            break
+          }
+        }
+      } else {
+        const bounds = getStrokeBounds(stroke)
+        if (bounds) {
+          const strokeCenterX = (bounds.minX + bounds.maxX) / 2
+          const strokeCenterY = (bounds.minY + bounds.maxY) / 2
+          
+          if (strokeCenterX >= rectMinX && strokeCenterX <= rectMaxX &&
+              strokeCenterY >= rectMinY && strokeCenterY <= rectMaxY) {
+            isInside = true
+          }
+          
+          if (!isInside) {
+            const overlapX = bounds.minX <= rectMaxX && bounds.maxX >= rectMinX
+            const overlapY = bounds.minY <= rectMaxY && bounds.maxY >= rectMinY
+            if (overlapX && overlapY) {
+              isInside = true
+            }
+          }
+        }
+      }
+      
+      if (isInside) {
+        result.push(stroke.id)
+      }
+    }
+    
+    return result
+  }, [getPageStrokes, currentPage, getStrokeBounds])
+
+  const startDrawing = useCallback((e: React.PointerEvent | React.MouseEvent) => {
     const point = getCanvasPoint(e)
+    const clientX = e.clientX
+    const clientY = e.clientY
+    const hasShiftKey = e.shiftKey
+    
+    if ('pointerType' in e && e.pointerType === 'pen') {
+      setCurrentPressure(e.pressure || 0.5)
+      activePointerId.current = e.pointerId
+    }
 
     if (activeTool === "select") {
       if (selectedStrokeId) {
@@ -418,7 +588,11 @@ export function Viewer({
       
       const strokeId = findStrokeAtPoint(point)
       if (strokeId) {
-        selectStroke(strokeId)
+        if (hasShiftKey) {
+          addToSelection(strokeId)
+        } else {
+          selectStroke(strokeId)
+        }
         const stroke = getStrokeById(strokeId)
         if (stroke && stroke.points.length > 0) {
           setDragOffset({
@@ -428,14 +602,19 @@ export function Viewer({
           setIsDragging(true)
         }
       } else {
-        selectStroke(null)
+        if (!hasShiftKey) {
+          clearSelection()
+        }
+        setIsRubberBanding(true)
+        setRubberBandStart(point)
+        setRubberBandEnd(point)
       }
       return
     }
 
     if (activeTool === "pan") {
       setIsPanning(true)
-      setLastPanPoint({ x: e.clientX, y: e.clientY })
+      setLastPanPoint({ x: clientX, y: clientY })
       return
     }
 
@@ -491,14 +670,27 @@ export function Viewer({
 
     setIsDrawing(true)
     setCurrentStroke([point])
-  }, [activeTool, getCanvasPoint, findStrokeAtPoint, selectStroke, getStrokeById, getResizeCorner, selectedStrokeId, textInput, pendingSymbol, onSymbolPlaced, addStroke, getToolSettings, currentPage])
+  }, [activeTool, getCanvasPoint, findStrokeAtPoint, selectStroke, getStrokeById, getResizeCorner, selectedStrokeId, textInput, pendingSymbol, onSymbolPlaced, addStroke, getToolSettings, currentPage, addToSelection, clearSelection, updateStroke])
 
-  const draw = useCallback((e: React.MouseEvent) => {
+  const draw = useCallback((e: React.PointerEvent | React.MouseEvent) => {
+    const clientX = e.clientX
+    const clientY = e.clientY
+    
+    if ('pointerType' in e && e.pointerType === 'pen') {
+      setCurrentPressure(e.pressure || 0.5)
+    }
+    
     if (isPanning) {
-      const dx = e.clientX - lastPanPoint.x
-      const dy = e.clientY - lastPanPoint.y
+      const dx = clientX - lastPanPoint.x
+      const dy = clientY - lastPanPoint.y
       setPanOffset(prev => ({ x: prev.x + dx, y: prev.y + dy }))
-      setLastPanPoint({ x: e.clientX, y: e.clientY })
+      setLastPanPoint({ x: clientX, y: clientY })
+      return
+    }
+
+    if (isRubberBanding && rubberBandStart) {
+      const point = getCanvasPoint(e)
+      setRubberBandEnd(point)
       return
     }
 
@@ -591,9 +783,26 @@ export function Viewer({
     }
 
     setCurrentStroke(prev => [...prev, point])
-  }, [isDrawing, isPanning, isDragging, isResizing, resizeCorner, lastPanPoint, getCanvasPoint, activeTool, pendingSymbol, symbolStart, selectedStrokeId, dragOffset, updateStroke, getStrokeById, getStrokeBounds, findStrokeAtPoint, deleteStroke])
+  }, [isDrawing, isPanning, isDragging, isResizing, isRubberBanding, rubberBandStart, resizeCorner, lastPanPoint, getCanvasPoint, activeTool, pendingSymbol, symbolStart, selectedStrokeId, dragOffset, updateStroke, getStrokeById, findStrokeAtPoint, deleteStroke])
 
   const stopDrawing = useCallback(() => {
+    if (isRubberBanding) {
+      if (rubberBandStart && rubberBandEnd) {
+        const width = Math.abs(rubberBandEnd.x - rubberBandStart.x)
+        const height = Math.abs(rubberBandEnd.y - rubberBandStart.y)
+        if (width > 5 || height > 5) {
+          const selectedIds = findStrokesInRect(rubberBandStart, rubberBandEnd)
+          if (selectedIds.length > 0) {
+            selectStrokes(selectedIds)
+          }
+        }
+      }
+      setIsRubberBanding(false)
+      setRubberBandStart(null)
+      setRubberBandEnd(null)
+      return
+    }
+
     if (isResizing) {
       setIsResizing(false)
       setResizeCorner(null)
@@ -662,10 +871,18 @@ export function Viewer({
     }
 
     const currentToolSettings = getToolSettings(activeTool)
+    
+    const simplifiedPoints = wasmReady && currentStroke.length > 10
+      ? wasmEngine.simplifyPoints(currentStroke, 1.5)
+      : currentStroke
+    
+    const pressureMultiplier = 0.5 + currentPressure
+    const finalThickness = Math.round(currentToolSettings.thickness * pressureMultiplier)
+    
     addStroke({
-      points: currentStroke,
+      points: simplifiedPoints,
       color: currentToolSettings.color,
-      thickness: currentToolSettings.thickness,
+      thickness: finalThickness,
       opacity: currentToolSettings.opacity,
       tool: activeTool,
       pageId: currentPage,
@@ -673,27 +890,80 @@ export function Viewer({
 
     setCurrentStroke([])
     setIsDrawing(false)
-  }, [isDrawing, isPanning, isDragging, isResizing, currentStroke, activeTool, getToolSettings, currentPage, addStroke, shapeStart, shapeEnd, activeShape, pendingSymbol, symbolStart, symbolEnd, onSymbolPlaced])
+  }, [isDrawing, isPanning, isDragging, isResizing, currentStroke, activeTool, getToolSettings, currentPage, addStroke, shapeStart, shapeEnd, activeShape, pendingSymbol, symbolStart, symbolEnd, onSymbolPlaced, wasmReady])
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+      const target = e.target as HTMLElement
+      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return
+      
+      const isCtrl = e.ctrlKey || e.metaKey
+      const key = e.key.toLowerCase()
+      
+      if (isCtrl && key === "z") {
         e.preventDefault()
+        e.stopPropagation()
         if (e.shiftKey) {
           redo()
         } else {
           undo()
         }
+        return
       }
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
+      if (isCtrl && key === "y") {
         e.preventDefault()
+        e.stopPropagation()
         redo()
+        return
+      }
+      if (isCtrl && key === "c") {
+        e.preventDefault()
+        e.stopPropagation()
+        copySelected()
+        return
+      }
+      if (isCtrl && key === "x") {
+        e.preventDefault()
+        e.stopPropagation()
+        cutSelected()
+        return
+      }
+      if (isCtrl && key === "v") {
+        e.preventDefault()
+        e.stopPropagation()
+        paste(currentPage)
+        return
+      }
+      if (isCtrl && key === "d") {
+        e.preventDefault()
+        e.stopPropagation()
+        duplicateSelected(currentPage)
+        return
+      }
+      if (key === "delete" || key === "backspace") {
+        if (selectedStrokeIds.length > 0) {
+          e.preventDefault()
+          e.stopPropagation()
+          deleteSelectedStrokes()
+        }
+        return
+      }
+      if (isCtrl && key === "a" && activeTool === "select") {
+        e.preventDefault()
+        e.stopPropagation()
+        const pageStrokes = getPageStrokes(currentPage)
+        selectStrokes(pageStrokes.map(s => s.id))
+        return
+      }
+      if (key === "escape") {
+        clearSelection()
+        return
       }
     }
     
-    window.addEventListener("keydown", handleKeyDown)
-    return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [undo, redo])
+    window.addEventListener("keydown", handleKeyDown, true)
+    return () => window.removeEventListener("keydown", handleKeyDown, true)
+  }, [undo, redo, copySelected, cutSelected, paste, duplicateSelected, deleteSelectedStrokes, currentPage, selectedStrokeIds, activeTool, getPageStrokes, selectStrokes, clearSelection])
 
   const handleWheel = useCallback((e: WheelEvent) => {
     if (e.ctrlKey || e.metaKey) {
@@ -713,205 +983,9 @@ export function Viewer({
     return () => container.removeEventListener("wheel", handleWheel)
   }, [handleWheel])
 
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
 
-    const ctx = canvas.getContext("2d")
-    if (!ctx) return
 
-    ctx.clearRect(0, 0, canvasWidth, canvasHeight)
 
-    if (pdfImage) {
-      ctx.drawImage(pdfImage, 0, 0, canvasWidth, canvasHeight)
-    } else {
-      ctx.fillStyle = "#ffffff"
-      ctx.fillRect(0, 0, canvasWidth, canvasHeight)
-
-      ctx.strokeStyle = "#e4e4e7"
-      ctx.lineWidth = 0.5
-      for (let x = 0; x <= canvasWidth; x += 20) {
-        ctx.beginPath()
-        ctx.moveTo(x, 0)
-        ctx.lineTo(x, canvasHeight)
-        ctx.stroke()
-      }
-      for (let y = 0; y <= canvasHeight; y += 20) {
-        ctx.beginPath()
-        ctx.moveTo(0, y)
-        ctx.lineTo(canvasWidth, y)
-        ctx.stroke()
-      }
-    }
-
-    ctx.strokeStyle = "#d4d4d8"
-    ctx.lineWidth = 1
-    ctx.strokeRect(0, 0, canvasWidth, canvasHeight)
-
-    interface DrawableStroke {
-      points: Point[]
-      color: string
-      thickness: number
-      opacity: number
-    }
-
-    const drawStroke = (stroke: DrawableStroke) => {
-      if (stroke.points.length < 2) return
-
-      ctx.globalAlpha = stroke.opacity / 100
-      ctx.strokeStyle = stroke.color
-      ctx.lineWidth = stroke.thickness
-      ctx.lineCap = "round"
-      ctx.lineJoin = "round"
-
-      ctx.beginPath()
-      ctx.moveTo(stroke.points[0].x, stroke.points[0].y)
-
-      for (let i = 1; i < stroke.points.length; i++) {
-        const midPoint = {
-          x: (stroke.points[i - 1].x + stroke.points[i].x) / 2,
-          y: (stroke.points[i - 1].y + stroke.points[i].y) / 2,
-        }
-        ctx.quadraticCurveTo(stroke.points[i - 1].x, stroke.points[i - 1].y, midPoint.x, midPoint.y)
-      }
-
-      const lastPoint = stroke.points[stroke.points.length - 1]
-      ctx.lineTo(lastPoint.x, lastPoint.y)
-      ctx.stroke()
-      ctx.globalAlpha = 1
-    }
-
-    getPageStrokes(currentPage).forEach((stroke) => {
-      if (stroke.tool.startsWith("shape-")) {
-        const shapeType = stroke.tool.replace("shape-", "")
-        if (stroke.points.length >= 2) {
-          drawShape(ctx, {
-            type: shapeType,
-            start: stroke.points[0],
-            end: stroke.points[1],
-          }, stroke.color, stroke.thickness, stroke.opacity, stroke.fillColor || stroke.backgroundColor)
-
-          if (stroke.id === selectedStrokeId) {
-            const bounds = getStrokeBounds(stroke)
-            if (bounds) {
-              const padding = 5
-              const boxX = bounds.minX - padding
-              const boxY = bounds.minY - padding
-              const boxW = bounds.maxX - bounds.minX + padding * 2
-              const boxH = bounds.maxY - bounds.minY + padding * 2
-
-              ctx.fillStyle = "rgba(139, 92, 246, 0.08)"
-              ctx.fillRect(boxX, boxY, boxW, boxH)
-
-              ctx.strokeStyle = "#8b5cf6"
-              ctx.lineWidth = 1.5
-              ctx.setLineDash([])
-              ctx.strokeRect(boxX, boxY, boxW, boxH)
-
-              const cornerSize = 8
-              ctx.fillStyle = "#ffffff"
-              ctx.strokeStyle = "#8b5cf6"
-              ctx.lineWidth = 2
-
-              const corners = [
-                [boxX - cornerSize/2, boxY - cornerSize/2],
-                [boxX + boxW - cornerSize/2, boxY - cornerSize/2],
-                [boxX - cornerSize/2, boxY + boxH - cornerSize/2],
-                [boxX + boxW - cornerSize/2, boxY + boxH - cornerSize/2],
-              ]
-              corners.forEach(([cx, cy]) => {
-                ctx.fillRect(cx, cy, cornerSize, cornerSize)
-                ctx.strokeRect(cx, cy, cornerSize, cornerSize)
-              })
-            }
-          }
-        }
-      } else if (stroke.tool.startsWith("text:")) {
-        const text = stroke.tool.replace("text:", "")
-        if (stroke.points.length > 0) {
-          const fontSize = Math.max(14, stroke.thickness * 4)
-          ctx.globalAlpha = stroke.opacity / 100
-          ctx.fillStyle = stroke.color
-          ctx.font = `${fontSize}px Inter, system-ui, sans-serif`
-          ctx.fillText(text, stroke.points[0].x, stroke.points[0].y)
-          ctx.globalAlpha = 1
-
-          if (stroke.id === selectedStrokeId) {
-            const bounds = getStrokeBounds(stroke)
-            if (bounds) {
-              const padding = 5
-              const boxX = bounds.minX - padding
-              const boxY = bounds.minY - padding
-              const boxW = bounds.maxX - bounds.minX + padding * 2
-              const boxH = bounds.maxY - bounds.minY + padding * 2
-
-              ctx.fillStyle = "rgba(139, 92, 246, 0.08)"
-              ctx.fillRect(boxX, boxY, boxW, boxH)
-
-              ctx.strokeStyle = "#8b5cf6"
-              ctx.lineWidth = 1.5
-              ctx.setLineDash([])
-              ctx.strokeRect(boxX, boxY, boxW, boxH)
-
-              const cornerSize = 8
-              ctx.fillStyle = "#ffffff"
-              ctx.strokeStyle = "#8b5cf6"
-              ctx.lineWidth = 2
-
-              const corners = [
-                [boxX - cornerSize/2, boxY - cornerSize/2],
-                [boxX + boxW - cornerSize/2, boxY - cornerSize/2],
-                [boxX - cornerSize/2, boxY + boxH - cornerSize/2],
-                [boxX + boxW - cornerSize/2, boxY + boxH - cornerSize/2],
-              ]
-              corners.forEach(([cx, cy]) => {
-                ctx.fillRect(cx, cy, cornerSize, cornerSize)
-                ctx.strokeRect(cx, cy, cornerSize, cornerSize)
-              })
-            }
-          }
-        }
-      } else {
-        drawStroke(stroke)
-      }
-    })
-
-    if (currentStroke.length > 0 && activeTool !== "eraser") {
-      const currentToolSettings = getToolSettings(activeTool)
-      drawStroke({
-        points: currentStroke,
-        color: currentToolSettings.color,
-        thickness: currentToolSettings.thickness,
-        opacity: currentToolSettings.opacity,
-      })
-    }
-
-    if (shapeStart && shapeEnd && isDrawing && activeTool === "shapes") {
-      const shapeSettings = getToolSettings("shapes")
-      drawShape(ctx, {
-        type: activeShape,
-        start: shapeStart,
-        end: shapeEnd,
-      }, shapeSettings.borderColor || shapeSettings.color, shapeSettings.thickness, shapeSettings.opacity, shapeSettings.backgroundColor !== "transparent" ? shapeSettings.backgroundColor : undefined)
-    }
-
-    if (symbolStart && symbolEnd && isDrawing && pendingSymbol) {
-      const textSettings = getToolSettings("text")
-      const size = Math.max(20, Math.abs(symbolEnd.x - symbolStart.x), Math.abs(symbolEnd.y - symbolStart.y))
-      const fontSize = Math.max(14, size)
-      ctx.globalAlpha = textSettings.opacity / 100
-      ctx.fillStyle = textSettings.color
-      ctx.font = `${fontSize}px Inter, system-ui, sans-serif`
-      ctx.fillText(pendingSymbol, symbolStart.x, symbolStart.y + fontSize * 0.8)
-      ctx.globalAlpha = 1
-
-      ctx.strokeStyle = "#8b5cf6"
-      ctx.lineWidth = 1
-      ctx.setLineDash([4, 4])
-      ctx.strokeRect(symbolStart.x - 4, symbolStart.y - 4, size + 8, size + 8)
-      ctx.setLineDash([])
-    }
-  }, [strokes, currentStroke, activeTool, getToolSettings, currentPage, getPageStrokes, shapeStart, shapeEnd, isDrawing, activeShape, selectedStrokeId, symbolStart, symbolEnd, pendingSymbol, getStrokeBounds, pdfImage, canvasWidth, canvasHeight])
 
   const getCursor = useCallback(() => {
     if (isZooming === 'in') return "url('/cursors/cursor-zoom-in.svg') 10 9, zoom-in"
@@ -1053,12 +1127,13 @@ export function Viewer({
 
         <div
           ref={containerRef}
-          className="flex flex-1 items-center justify-center overflow-hidden"
+          className="flex flex-1 items-center justify-center overflow-hidden touch-none"
           style={{ cursor: getCursor() }}
-          onMouseDown={startDrawing}
-          onMouseMove={draw}
-          onMouseUp={stopDrawing}
-          onMouseLeave={stopDrawing}
+          onPointerDown={startDrawing}
+          onPointerMove={draw}
+          onPointerUp={stopDrawing}
+          onPointerLeave={stopDrawing}
+          onPointerCancel={stopDrawing}
         >
           <div
             className="relative transition-transform duration-100 ease-out"
@@ -1080,8 +1155,22 @@ export function Viewer({
 
             <div className="pointer-events-none absolute -inset-4 rounded-sm border-2 border-dashed border-violet-500/20" />
 
+            {isRubberBanding && rubberBandStart && rubberBandEnd && 
+              (Math.abs(rubberBandEnd.x - rubberBandStart.x) > 5 || Math.abs(rubberBandEnd.y - rubberBandStart.y) > 5) && (
+              <div
+                className="pointer-events-none absolute rounded-sm border border-dashed border-sky-500 bg-sky-500/15"
+                style={{
+                  left: Math.min(rubberBandStart.x, rubberBandEnd.x),
+                  top: Math.min(rubberBandStart.y, rubberBandEnd.y),
+                  width: Math.abs(rubberBandEnd.x - rubberBandStart.x),
+                  height: Math.abs(rubberBandEnd.y - rubberBandStart.y),
+                }}
+              />
+            )}
+
             <div className="pointer-events-none absolute -bottom-8 left-1/2 -translate-x-1/2 whitespace-nowrap text-xs text-muted-foreground">
               {canvasWidth} × {canvasHeight} px · Page {currentPage}
+              {wasmReady && fps > 0 && <span className="ml-2 text-green-500">⚡ {fps} FPS</span>}
             </div>
 
             {textInput && (
@@ -1117,143 +1206,120 @@ export function Viewer({
         </div>
 
 
-        {selectedStrokeId && (getStrokeById(selectedStrokeId)?.tool.startsWith("text:") || getStrokeById(selectedStrokeId)?.tool.startsWith("shape-")) && (
+        {selectedStrokeIds.length > 0 && (
           <div className="absolute left-1/2 top-16 z-30 -translate-x-1/2 rounded-2xl border bg-background/95 p-2 shadow-xl backdrop-blur-xl">
             <div className="flex items-center gap-2">
-              <div className="flex items-center gap-0.5 rounded-full bg-muted p-1">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 w-7 rounded-full p-0"
-                  onClick={() => {
-                    const stroke = getStrokeById(selectedStrokeId)
-                    if (stroke) {
-                      if (stroke.tool.startsWith("shape-") && stroke.points.length >= 2) {
-                        updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x - 10, y: stroke.points[0].y }, { x: stroke.points[1].x - 10, y: stroke.points[1].y }] })
-                      } else {
-                        updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x - 10, y: stroke.points[0].y }] })
-                      }
-                    }
-                  }}
-                >
-                  ←
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 w-7 rounded-full p-0"
-                  onClick={() => {
-                    const stroke = getStrokeById(selectedStrokeId)
-                    if (stroke) {
-                      if (stroke.tool.startsWith("shape-") && stroke.points.length >= 2) {
-                        updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x + 10, y: stroke.points[0].y }, { x: stroke.points[1].x + 10, y: stroke.points[1].y }] })
-                      } else {
-                        updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x + 10, y: stroke.points[0].y }] })
-                      }
-                    }
-                  }}
-                >
-                  →
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 w-7 rounded-full p-0"
-                  onClick={() => {
-                    const stroke = getStrokeById(selectedStrokeId)
-                    if (stroke) {
-                      if (stroke.tool.startsWith("shape-") && stroke.points.length >= 2) {
-                        updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x, y: stroke.points[0].y - 10 }, { x: stroke.points[1].x, y: stroke.points[1].y - 10 }] })
-                      } else {
-                        updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x, y: stroke.points[0].y - 10 }] })
-                      }
-                    }
-                  }}
-                >
-                  ↑
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 w-7 rounded-full p-0"
-                  onClick={() => {
-                    const stroke = getStrokeById(selectedStrokeId)
-                    if (stroke) {
-                      if (stroke.tool.startsWith("shape-") && stroke.points.length >= 2) {
-                        updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x, y: stroke.points[0].y + 10 }, { x: stroke.points[1].x, y: stroke.points[1].y + 10 }] })
-                      } else {
-                        updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x, y: stroke.points[0].y + 10 }] })
-                      }
-                    }
-                  }}
-                >
-                  ↓
-                </Button>
-              </div>
-
-              <div className="h-6 w-px bg-border" />
-
-              <div className="flex items-center gap-0.5 rounded-full bg-muted p-1">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 w-7 rounded-full p-0 text-base font-bold"
-                  onClick={() => {
-                    const stroke = getStrokeById(selectedStrokeId)
-                    if (!stroke) return
-                    if (stroke.tool.startsWith("shape-") && stroke.points.length >= 2) {
-                      const cx = (stroke.points[0].x + stroke.points[1].x) / 2
-                      const cy = (stroke.points[0].y + stroke.points[1].y) / 2
-                      const scale = 0.9
-                      updateStroke(selectedStrokeId, {
-                        points: [
-                          { x: cx + (stroke.points[0].x - cx) * scale, y: cy + (stroke.points[0].y - cy) * scale },
-                          { x: cx + (stroke.points[1].x - cx) * scale, y: cy + (stroke.points[1].y - cy) * scale },
-                        ]
-                      })
-                    } else if (stroke.thickness > 1) {
-                      updateStroke(selectedStrokeId, { thickness: stroke.thickness - 1 })
-                    }
-                  }}
-                >
-                  −
-                </Button>
-                <span className="w-10 text-center text-xs font-medium">
-                  {(() => {
-                    const stroke = getStrokeById(selectedStrokeId)
-                    if (stroke?.tool.startsWith("shape-") && stroke.points.length >= 2) {
-                      const w = Math.abs(stroke.points[1].x - stroke.points[0].x)
-                      const h = Math.abs(stroke.points[1].y - stroke.points[0].y)
-                      return `${Math.round(Math.max(w, h))}px`
-                    }
-                    return `${Math.max(14, (stroke?.thickness || 3) * 4)}px`
-                  })()}
+              {selectedStrokeIds.length > 1 && (
+                <span className="px-2 text-xs text-muted-foreground">
+                  {selectedStrokeIds.length} selected
                 </span>
+              )}
+
+              <div className="flex items-center gap-0.5 rounded-full bg-muted p-1">
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-7 w-7 rounded-full p-0 text-base font-bold"
-                  onClick={() => {
-                    const stroke = getStrokeById(selectedStrokeId)
-                    if (!stroke) return
-                    if (stroke.tool.startsWith("shape-") && stroke.points.length >= 2) {
-                      const cx = (stroke.points[0].x + stroke.points[1].x) / 2
-                      const cy = (stroke.points[0].y + stroke.points[1].y) / 2
-                      const scale = 1.1
-                      updateStroke(selectedStrokeId, {
-                        points: [
-                          { x: cx + (stroke.points[0].x - cx) * scale, y: cy + (stroke.points[0].y - cy) * scale },
-                          { x: cx + (stroke.points[1].x - cx) * scale, y: cy + (stroke.points[1].y - cy) * scale },
-                        ]
-                      })
-                    } else if (stroke.thickness < 100) {
-                      updateStroke(selectedStrokeId, { thickness: stroke.thickness + 1 })
-                    }
-                  }}
+                  className="h-7 px-2 rounded-full text-xs"
+                  onClick={() => copySelected()}
+                  title="Copy (Ctrl+C)"
                 >
-                  +
+                  📋
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 rounded-full text-xs"
+                  onClick={() => cutSelected()}
+                  title="Cut (Ctrl+X)"
+                >
+                  ✂️
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 rounded-full text-xs"
+                  onClick={() => duplicateSelected(currentPage)}
+                  title="Duplicate (Ctrl+D)"
+                >
+                  📑
                 </Button>
               </div>
+
+              {selectedStrokeIds.length === 1 && selectedStrokeId && (
+                <>
+                  <div className="h-6 w-px bg-border" />
+                  <div className="flex items-center gap-0.5 rounded-full bg-muted p-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 w-7 rounded-full p-0"
+                      onClick={() => {
+                        const stroke = getStrokeById(selectedStrokeId)
+                        if (stroke) {
+                          if (stroke.tool.startsWith("shape-") && stroke.points.length >= 2) {
+                            updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x - 10, y: stroke.points[0].y }, { x: stroke.points[1].x - 10, y: stroke.points[1].y }] })
+                          } else {
+                            updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x - 10, y: stroke.points[0].y }] })
+                          }
+                        }
+                      }}
+                    >
+                      ←
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 w-7 rounded-full p-0"
+                      onClick={() => {
+                        const stroke = getStrokeById(selectedStrokeId)
+                        if (stroke) {
+                          if (stroke.tool.startsWith("shape-") && stroke.points.length >= 2) {
+                            updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x + 10, y: stroke.points[0].y }, { x: stroke.points[1].x + 10, y: stroke.points[1].y }] })
+                          } else {
+                            updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x + 10, y: stroke.points[0].y }] })
+                          }
+                        }
+                      }}
+                    >
+                      →
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 w-7 rounded-full p-0"
+                      onClick={() => {
+                        const stroke = getStrokeById(selectedStrokeId)
+                        if (stroke) {
+                          if (stroke.tool.startsWith("shape-") && stroke.points.length >= 2) {
+                            updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x, y: stroke.points[0].y - 10 }, { x: stroke.points[1].x, y: stroke.points[1].y - 10 }] })
+                          } else {
+                            updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x, y: stroke.points[0].y - 10 }] })
+                          }
+                        }
+                      }}
+                    >
+                      ↑
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 w-7 rounded-full p-0"
+                      onClick={() => {
+                        const stroke = getStrokeById(selectedStrokeId)
+                        if (stroke) {
+                          if (stroke.tool.startsWith("shape-") && stroke.points.length >= 2) {
+                            updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x, y: stroke.points[0].y + 10 }, { x: stroke.points[1].x, y: stroke.points[1].y + 10 }] })
+                          } else {
+                            updateStroke(selectedStrokeId, { points: [{ x: stroke.points[0].x, y: stroke.points[0].y + 10 }] })
+                          }
+                        }
+                      }}
+                    >
+                      ↓
+                    </Button>
+                  </div>
+                </>
+              )}
 
               <div className="h-6 w-px bg-border" />
 
@@ -1261,7 +1327,8 @@ export function Viewer({
                 variant="ghost"
                 size="sm"
                 className="h-7 w-7 rounded-full p-0 text-red-500 hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900"
-                onClick={() => deleteStroke(selectedStrokeId)}
+                onClick={() => deleteSelectedStrokes()}
+                title="Delete (Del)"
               >
                 🗑
               </Button>
@@ -1272,7 +1339,8 @@ export function Viewer({
                 variant="ghost"
                 size="sm"
                 className="h-7 rounded-full px-3 text-xs"
-                onClick={() => selectStroke(null)}
+                onClick={() => clearSelection()}
+                title="Deselect (Esc)"
               >
                 ✓
               </Button>

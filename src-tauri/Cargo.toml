@@ -22,4 +22,5 @@ serde_json = "1"
 pdfium-render = { version = "0.8.37", features = ["image", "thread_safe"] }
 base64 = "0.22"
 image = "0.25"
+printpdf = "0.7"
 

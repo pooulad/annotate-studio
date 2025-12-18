@@ -136,11 +136,18 @@ interface CanvasStore {
   redoStack: Stroke[][]
   currentPageId: number
   selectedStrokeId: string | null
+  selectedStrokeIds: string[]
+  clipboard: Stroke[]
   
   addStroke: (stroke: Omit<Stroke, "id" | "timestamp">) => void
   updateStroke: (id: string, updates: Partial<Pick<Stroke, "points" | "thickness" | "color" | "fillColor" | "backgroundColor">>) => void
   deleteStroke: (id: string) => void
+  deleteSelectedStrokes: () => void
   selectStroke: (id: string | null) => void
+  selectStrokes: (ids: string[]) => void
+  addToSelection: (id: string) => void
+  removeFromSelection: (id: string) => void
+  clearSelection: () => void
   getStrokeById: (id: string) => Stroke | undefined
   undo: () => boolean
   redo: () => boolean
@@ -149,6 +156,10 @@ interface CanvasStore {
   getPageStrokes: (pageId: number) => Stroke[]
   clearPage: (pageId: number) => void
   setCurrentPage: (pageId: number) => void
+  copySelected: () => void
+  cutSelected: () => void
+  paste: (pageId: number, offset?: Point) => void
+  duplicateSelected: (pageId: number) => void
 }
 
 export const useCanvasStore = create<CanvasStore>()((set, get) => ({
@@ -157,6 +168,8 @@ export const useCanvasStore = create<CanvasStore>()((set, get) => ({
   redoStack: [],
   currentPageId: 1,
   selectedStrokeId: null,
+  selectedStrokeIds: [],
+  clipboard: [],
 
   addStroke: (strokeData) => {
     const newStroke: Stroke = {
@@ -188,10 +201,56 @@ export const useCanvasStore = create<CanvasStore>()((set, get) => ({
       undoStack: [...state.undoStack, state.strokes],
       redoStack: [],
       selectedStrokeId: state.selectedStrokeId === id ? null : state.selectedStrokeId,
+      selectedStrokeIds: state.selectedStrokeIds.filter((sid) => sid !== id),
     }))
   },
 
-  selectStroke: (id) => set({ selectedStrokeId: id }),
+  deleteSelectedStrokes: () => {
+    const { selectedStrokeIds, strokes } = get()
+    if (selectedStrokeIds.length === 0) return
+    
+    set((state) => ({
+      strokes: state.strokes.filter((s) => !selectedStrokeIds.includes(s.id)),
+      undoStack: [...state.undoStack, strokes],
+      redoStack: [],
+      selectedStrokeId: null,
+      selectedStrokeIds: [],
+    }))
+  },
+
+  selectStroke: (id) => set({ 
+    selectedStrokeId: id,
+    selectedStrokeIds: id ? [id] : [],
+  }),
+
+  selectStrokes: (ids) => set({
+    selectedStrokeId: ids.length > 0 ? ids[0] : null,
+    selectedStrokeIds: ids,
+  }),
+
+  addToSelection: (id) => {
+    const { selectedStrokeIds } = get()
+    if (!selectedStrokeIds.includes(id)) {
+      set({
+        selectedStrokeIds: [...selectedStrokeIds, id],
+        selectedStrokeId: id,
+      })
+    }
+  },
+
+  removeFromSelection: (id) => {
+    const { selectedStrokeIds } = get()
+    const newIds = selectedStrokeIds.filter((sid) => sid !== id)
+    set({
+      selectedStrokeIds: newIds,
+      selectedStrokeId: newIds.length > 0 ? newIds[0] : null,
+    })
+  },
+
+  clearSelection: () => set({
+    selectedStrokeId: null,
+    selectedStrokeIds: [],
+  }),
 
   getStrokeById: (id) => get().strokes.find((s) => s.id === id),
 
@@ -235,4 +294,70 @@ export const useCanvasStore = create<CanvasStore>()((set, get) => ({
   },
 
   setCurrentPage: (pageId) => set({ currentPageId: pageId }),
+
+  copySelected: () => {
+    const { selectedStrokeIds, strokes } = get()
+    if (selectedStrokeIds.length === 0) return
+    
+    const selectedStrokes = strokes.filter((s) => selectedStrokeIds.includes(s.id))
+    set({ clipboard: [...selectedStrokes] })
+  },
+
+  cutSelected: () => {
+    const { selectedStrokeIds, strokes } = get()
+    if (selectedStrokeIds.length === 0) return
+    
+    const selectedStrokes = strokes.filter((s) => selectedStrokeIds.includes(s.id))
+    set((state) => ({
+      clipboard: selectedStrokes,
+      strokes: state.strokes.filter((s) => !selectedStrokeIds.includes(s.id)),
+      undoStack: [...state.undoStack, strokes],
+      redoStack: [],
+      selectedStrokeId: null,
+      selectedStrokeIds: [],
+    }))
+  },
+
+  paste: (pageId, offset = { x: 20, y: 20 }) => {
+    const { clipboard, strokes } = get()
+    if (clipboard.length === 0) return
+    
+    const newStrokes: Stroke[] = clipboard.map((s) => ({
+      ...s,
+      id: `stroke-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      timestamp: Date.now(),
+      pageId,
+      points: s.points.map((p) => ({ x: p.x + offset.x, y: p.y + offset.y })),
+    }))
+    
+    set((state) => ({
+      strokes: [...state.strokes, ...newStrokes],
+      undoStack: [...state.undoStack, strokes],
+      redoStack: [],
+      selectedStrokeIds: newStrokes.map((s) => s.id),
+      selectedStrokeId: newStrokes[0]?.id || null,
+    }))
+  },
+
+  duplicateSelected: (pageId) => {
+    const { selectedStrokeIds, strokes } = get()
+    if (selectedStrokeIds.length === 0) return
+    
+    const selectedStrokes = strokes.filter((s) => selectedStrokeIds.includes(s.id))
+    const newStrokes: Stroke[] = selectedStrokes.map((s) => ({
+      ...s,
+      id: `stroke-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      timestamp: Date.now(),
+      pageId,
+      points: s.points.map((p) => ({ x: p.x + 20, y: p.y + 20 })),
+    }))
+    
+    set((state) => ({
+      strokes: [...state.strokes, ...newStrokes],
+      undoStack: [...state.undoStack, strokes],
+      redoStack: [],
+      selectedStrokeIds: newStrokes.map((s) => s.id),
+      selectedStrokeId: newStrokes[0]?.id || null,
+    }))
+  },
 }))

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, memo, useCallback } from "react"
 import { cn } from "@/lib/utils"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
@@ -27,9 +27,80 @@ interface SidebarProps {
   onDeletePage: (id: number) => void
 }
 
-export function Sidebar({ currentPage, onPageChange, pages, onAddPage, onDeletePage }: SidebarProps) {
+const PageItem = memo(function PageItem({ 
+  page, 
+  index, 
+  isActive, 
+  canDelete,
+  onSelect, 
+  onDelete 
+}: { 
+  page: Page
+  index: number
+  isActive: boolean
+  canDelete: boolean
+  onSelect: () => void
+  onDelete: () => void
+}) {
+  return (
+    <button
+      onClick={onSelect}
+      className={cn(
+        "group relative flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors",
+        isActive
+          ? "bg-primary text-primary-foreground"
+          : "hover:bg-muted"
+      )}
+    >
+      <div className={cn(
+        "flex h-8 w-6 shrink-0 items-center justify-center rounded border text-xs font-medium",
+        isActive 
+          ? "border-primary-foreground/30 bg-primary-foreground/10" 
+          : "border-border bg-background"
+      )}>
+        {index + 1}
+      </div>
+      
+      <div className="flex flex-1 items-center justify-between min-w-0">
+        <span className="text-sm font-medium truncate">
+          Page {index + 1}
+        </span>
+        {page.hasAnnotations && (
+          <Pencil className="h-3 w-3 shrink-0 text-amber-500" />
+        )}
+      </div>
+
+      {canDelete && (
+        <span
+          role="button"
+          tabIndex={0}
+          onClick={(e) => {
+            e.stopPropagation()
+            onDelete()
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.stopPropagation()
+              onDelete()
+            }
+          }}
+          className={cn(
+            "flex h-5 w-5 shrink-0 items-center justify-center rounded opacity-0 transition-opacity group-hover:opacity-100",
+            isActive 
+              ? "hover:bg-primary-foreground/20" 
+              : "hover:bg-destructive hover:text-destructive-foreground"
+          )}
+        >
+          <Trash2 className="h-3 w-3" />
+        </span>
+      )}
+    </button>
+  )
+})
+
+function SidebarComponent({ currentPage, onPageChange, pages, onAddPage, onDeletePage }: SidebarProps) {
   const [isCollapsed, setIsCollapsed] = useState(false)
-  const { pagesMeta } = usePdfStore()
+  const pagesMeta = usePdfStore(s => s.pagesMeta)
 
   if (isCollapsed) {
     return (
@@ -94,59 +165,15 @@ export function Sidebar({ currentPage, onPageChange, pages, onAddPage, onDeleteP
         <ScrollArea className="flex-1 min-h-0">
           <div className="flex flex-col gap-1.5 p-2">
             {pages.map((page, index) => (
-              <button
+              <PageItem
                 key={page.id}
-                onClick={() => onPageChange(page.id)}
-                className={cn(
-                  "group relative flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors",
-                  currentPage === page.id
-                    ? "bg-primary text-primary-foreground"
-                    : "hover:bg-muted"
-                )}
-              >
-                <div className={cn(
-                  "flex h-8 w-6 shrink-0 items-center justify-center rounded border text-xs font-medium",
-                  currentPage === page.id 
-                    ? "border-primary-foreground/30 bg-primary-foreground/10" 
-                    : "border-border bg-background"
-                )}>
-                  {index + 1}
-                </div>
-                
-                <div className="flex flex-1 items-center justify-between min-w-0">
-                  <span className="text-sm font-medium truncate">
-                    Page {index + 1}
-                  </span>
-                  {page.hasAnnotations && (
-                    <Pencil className="h-3 w-3 shrink-0 text-amber-500" />
-                  )}
-                </div>
-
-                {pages.length > 1 && (
-                  <span
-                    role="button"
-                    tabIndex={0}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      onDeletePage(page.id)
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.stopPropagation()
-                        onDeletePage(page.id)
-                      }
-                    }}
-                    className={cn(
-                      "flex h-5 w-5 shrink-0 items-center justify-center rounded opacity-0 transition-opacity group-hover:opacity-100",
-                      currentPage === page.id 
-                        ? "hover:bg-primary-foreground/20" 
-                        : "hover:bg-destructive hover:text-destructive-foreground"
-                    )}
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </span>
-                )}
-              </button>
+                page={page}
+                index={index}
+                isActive={currentPage === page.id}
+                canDelete={pages.length > 1}
+                onSelect={() => onPageChange(page.id)}
+                onDelete={() => onDeletePage(page.id)}
+              />
             ))}
           </div>
         </ScrollArea>
@@ -154,3 +181,5 @@ export function Sidebar({ currentPage, onPageChange, pages, onAddPage, onDeleteP
     </TooltipProvider>
   )
 }
+
+export const Sidebar = memo(SidebarComponent)

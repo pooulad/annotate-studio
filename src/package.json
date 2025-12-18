@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
-    "build": "next build",
+    "build": "npm run build:wasm && next build",
+    "build:wasm": "cd wasm-renderer && wasm-pack build --target web --out-dir ../node_modules/wasm-renderer",
     "start": "next start",
     "lint": "eslint"
   },

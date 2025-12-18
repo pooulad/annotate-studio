@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback, useEffect } from "react"
+import { useState, useCallback, useEffect, useRef } from "react"
 import { Header } from "@/components/Header"
 import { Viewer } from "@/components/Viewer"
 import { Dock, type Tool, type ShapeType } from "@/components/Dock"
@@ -43,6 +43,13 @@ export default function Home() {
   const [pendingSymbol, setPendingSymbol] = useState<string | null>(null)
   
   const [toolSettings, setToolSettings] = useState<Record<string, ToolSettings>>(defaultToolSettings)
+  const [canvasElement, setCanvasElement] = useState<HTMLCanvasElement | null>(null)
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  
+  const handleCanvasReady = useCallback((canvas: HTMLCanvasElement | null) => {
+    canvasRef.current = canvas
+    setCanvasElement(canvas)
+  }, [])
   
   const currentSettings = toolSettings[activeTool] || toolSettings.pen
   
@@ -53,6 +60,8 @@ export default function Home() {
       [toolKey]: { ...prev[toolKey], ...updates }
     }))
   }, [activeTool])
+
+  const clearPdf = usePdfStore(s => s.clearPdf)
 
   const handleAddPage = useCallback(() => {
     const newId = Math.max(...pages.map(p => p.id)) + 1
@@ -68,6 +77,12 @@ export default function Home() {
       setCurrentPage(remaining[0]?.id || 1)
     }
   }, [pages, currentPage])
+
+  const handleNewFile = useCallback(() => {
+    clearPdf()
+    setPages([{ id: 1, name: "Page 1", hasAnnotations: false }])
+    setCurrentPage(1)
+  }, [clearPdf])
 
 
   const { undo, redo, canUndo, canRedo } = useCanvasStore()
@@ -93,6 +108,9 @@ export default function Home() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement
+      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return
+      
       if (e.ctrlKey || e.metaKey) {
         switch (e.key.toLowerCase()) {
           case "=":
@@ -129,16 +147,12 @@ export default function Home() {
             setActiveShape("rectangle")
             setActiveTool("shapes")
             break
-          case "c":
+          case "o":
             setActiveShape("circle")
             setActiveTool("shapes")
             break
           case "l":
             setActiveShape("line")
-            setActiveTool("shapes")
-            break
-          case "a":
-            setActiveShape("arrow")
             setActiveTool("shapes")
             break
         }
@@ -153,11 +167,13 @@ export default function Home() {
     <ThemeProvider defaultTheme="light" storageKey="luminapdf-theme">
       <div className="flex h-screen flex-col overflow-hidden bg-background">
         <Header
-          onNewFile={handleAddPage}
+          onNewFile={handleNewFile}
           onZoomIn={() => setZoom(prev => Math.min(prev + 25, 400))}
           onZoomOut={() => setZoom(prev => Math.max(prev - 25, 25))}
           onResetZoom={() => setZoom(100)}
           onPdfLoaded={handlePdfLoaded}
+          currentPage={currentPage}
+          canvasRef={canvasRef}
         />
         <div className="relative flex flex-1 overflow-hidden">
           <Sidebar
@@ -190,6 +206,7 @@ export default function Home() {
               setPendingSymbol(null)
               setActiveTool("select")
             }}
+            onCanvasReady={handleCanvasReady}
           />
           <Inspector
             activeTool={activeTool}

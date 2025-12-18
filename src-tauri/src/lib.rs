@@ -142,6 +142,157 @@ fn get_pdf_info(state: State<'_, AppState>) -> Result<(Option<String>, usize), S
     ))
 }
 
+#[derive(Serialize, Deserialize)]
+struct ProjectData {
+    version: String,
+    pdf_path: Option<String>,
+    strokes: String,
+}
+
+#[tauri::command]
+async fn save_project(path: String, pdf_path: Option<String>, strokes_json: String) -> Result<(), String> {
+    let project = ProjectData {
+        version: "1.0.0".to_string(),
+        pdf_path,
+        strokes: strokes_json,
+    };
+    
+    let json = serde_json::to_string_pretty(&project)
+        .map_err(|e| format!("Failed to serialize project: {}", e))?;
+    
+    std::fs::write(&path, json)
+        .map_err(|e| format!("Failed to write file: {}", e))?;
+    
+    Ok(())
+}
+
+#[tauri::command]
+async fn load_project(path: String) -> Result<ProjectData, String> {
+    let content = std::fs::read_to_string(&path)
+        .map_err(|e| format!("Failed to read file: {}", e))?;
+    
+    let project: ProjectData = serde_json::from_str(&content)
+        .map_err(|e| format!("Failed to parse project: {}", e))?;
+    
+    Ok(project)
+}
+
+#[tauri::command]
+async fn export_canvas(path: String, image_data: String) -> Result<(), String> {
+    let base64_data = image_data
+        .strip_prefix("data:image/png;base64,")
+        .or_else(|| image_data.strip_prefix("data:image/jpeg;base64,"))
+        .unwrap_or(&image_data);
+    
+    let decoded = STANDARD.decode(base64_data)
+        .map_err(|e| format!("Failed to decode image: {}", e))?;
+    
+    std::fs::write(&path, decoded)
+        .map_err(|e| format!("Failed to write image: {}", e))?;
+    
+    Ok(())
+}
+
+#[derive(Serialize, Deserialize)]
+struct ExportPdfPage {
+    image_data: String,
+    width: f32,
+    height: f32,
+}
+
+#[tauri::command]
+async fn export_to_pdf(path: String, pages: Vec<ExportPdfPage>) -> Result<(), String> {
+    use printpdf::{PdfDocument, Mm, Px, Image, ImageXObject, ColorSpace, ColorBits, ImageTransform};
+    use ::image::ImageReader;
+    
+    if pages.is_empty() {
+        return Err("No pages to export".to_string());
+    }
+    
+    let first_page = &pages[0];
+    let page_width_mm = Mm(first_page.width * 0.264583);
+    let page_height_mm = Mm(first_page.height * 0.264583);
+    
+    let (doc, page1, layer1) = PdfDocument::new(
+        "Annotate Studio Export",
+        page_width_mm,
+        page_height_mm,
+        "Layer 1"
+    );
+    
+    for (i, page_data) in pages.iter().enumerate() {
+        let pw_mm = page_data.width * 0.264583;
+        let ph_mm = page_data.height * 0.264583;
+        
+        let (current_page, current_layer) = if i == 0 {
+            (page1, layer1)
+        } else {
+            let (page, layer) = doc.add_page(
+                Mm(pw_mm),
+                Mm(ph_mm),
+                "Layer 1"
+            );
+            (page, layer)
+        };
+        
+        let base64_data = page_data.image_data
+            .strip_prefix("data:image/png;base64,")
+            .or_else(|| page_data.image_data.strip_prefix("data:image/jpeg;base64,"))
+            .unwrap_or(&page_data.image_data);
+        
+        let decoded = STANDARD.decode(base64_data)
+            .map_err(|e| format!("Failed to decode image: {}", e))?;
+        
+        let img = ImageReader::new(std::io::Cursor::new(&decoded))
+            .with_guessed_format()
+            .map_err(|e| format!("Failed to guess image format: {}", e))?
+            .decode()
+            .map_err(|e| format!("Failed to decode image: {}", e))?;
+        
+        let img_rgb = img.to_rgb8();
+        let (img_width, img_height) = (img_rgb.width(), img_rgb.height());
+        
+        let image = Image::from(ImageXObject {
+            width: Px(img_width as usize),
+            height: Px(img_height as usize),
+            color_space: ColorSpace::Rgb,
+            bits_per_component: ColorBits::Bit8,
+            interpolate: true,
+            image_data: img_rgb.into_raw(),
+            image_filter: None,
+            clipping_bbox: None,
+            smask: None,
+        });
+        
+        let dpi = 72.0;
+        let img_width_mm = (img_width as f32 / dpi) * 25.4;
+        let img_height_mm = (img_height as f32 / dpi) * 25.4;
+        
+        let scale_x = pw_mm / img_width_mm;
+        let scale_y = ph_mm / img_height_mm;
+        
+        let layer = doc.get_page(current_page).get_layer(current_layer);
+        image.add_to_layer(
+            layer,
+            ImageTransform {
+                translate_x: Some(Mm(0.0)),
+                translate_y: Some(Mm(0.0)),
+                scale_x: Some(scale_x),
+                scale_y: Some(scale_y),
+                ..Default::default()
+            }
+        );
+    }
+    
+    let pdf_bytes = doc.save_to_bytes()
+        .map_err(|e| format!("Failed to save PDF: {}", e))?;
+    
+    std::fs::write(&path, pdf_bytes)
+        .map_err(|e| format!("Failed to write PDF file: {}", e))?;
+    
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
@@ -157,7 +308,11 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             open_pdf,
             render_pdf_page,
-            get_pdf_info
+            get_pdf_info,
+            save_project,
+            load_project,
+            export_canvas,
+            export_to_pdf
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
