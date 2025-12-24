@@ -1,5 +1,5 @@
-let wasmModule: any = null
-let engine: any = null
+let wasmModule: typeof import("wasm-renderer") | null = null
+let engine: InstanceType<typeof import("wasm-renderer").RenderEngine> | null = null
 
 export interface Point {
   x: number
@@ -34,7 +34,7 @@ export interface SymbolPreview {
   opacity: number
 }
 
-export interface CurrentStrokeStyle {
+export interface StrokeStyle {
   color: string
   thickness: number
   opacity: number
@@ -42,24 +42,22 @@ export interface CurrentStrokeStyle {
 
 export async function initWasm(): Promise<boolean> {
   if (wasmModule) return true
-
   try {
     wasmModule = await import("wasm-renderer")
     await wasmModule.default()
     return true
   } catch (err) {
-    console.warn("WASM not available:", err)
     return false
   }
 }
 
-export function createEngine(width: number, height: number): any {
+export function createEngine(width: number, height: number) {
   if (!wasmModule) return null
   engine = new wasmModule.RenderEngine(width, height)
   return engine
 }
 
-export function getEngine(): any {
+export function getEngine() {
   return engine
 }
 
@@ -72,7 +70,7 @@ export function setStrokes(strokes: Stroke[]): void {
   engine.set_strokes(JSON.stringify(strokes))
 }
 
-export function setCurrentStroke(points: Point[], style: CurrentStrokeStyle | null): void {
+export function setCurrentStroke(points: Point[], style: StrokeStyle | null): void {
   if (!engine) return
   engine.set_current_stroke(
     JSON.stringify(points),

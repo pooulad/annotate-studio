@@ -4,30 +4,16 @@ declare module "wasm-renderer" {
   export class RenderEngine {
     constructor(width: number, height: number)
     resize(width: number, height: number): void
-    set_transform(scale: number, offset_x: number, offset_y: number): void
-    pan(dx: number, dy: number): void
-    zoom(factor: number, center_x: number, center_y: number): void
-    add_stroke(stroke_json: string): void
-    clear_strokes(): void
-    remove_stroke(index: number): void
-    is_dirty(): boolean
-    get_scale(): number
-    get_offset_x(): number
-    get_offset_y(): number
-    world_to_screen_x(x: number): number
-    world_to_screen_y(y: number): number
-    render_to_context(ctx: CanvasRenderingContext2D): void
-    hit_test(screen_x: number, screen_y: number, radius: number): number
-    get_visible_bounds(): Float64Array
-  }
-
-  export class PerformanceMonitor {
-    constructor()
-    frame(current_time: number): void
+    set_strokes(strokes_json: string): void
+    set_current_stroke(points_json: string, style_json: string): void
+    set_shape_preview(preview_json: string): void
+    set_symbol_preview(preview_json: string): void
+    set_selected(id: string): void
+    set_selected_ids(ids_json: string): void
+    record_frame(time: number): void
     get_fps(): number
-    get_frame_time(): number
+    render(ctx: CanvasRenderingContext2D, has_pdf: boolean): void
+    hit_test(x: number, y: number, radius: number): number
+    static simplify_points(points_json: string, tolerance: number): string
   }
-
-  export function interpolate_points(points_json: string, smoothness: number): string
-  export function simplify_points(points_json: string, tolerance: number): string
 }
